@@ -40,6 +40,7 @@ import {
 } from '../types/reviews';
 import {
   applyHumanImperfections,
+  buildDetailedServiceStory,
   buildUltraShortReview,
   EXTRA_DIVERSE_SUBJECTS,
   getServiceSpecificSentence,
@@ -352,7 +353,8 @@ function composeCandidateCopy(
   forceLiteralProduct: boolean,
   serviceMode = false,
   globalSubjectCounts?: Map<string, number>,
-  globalOpenerCounts?: Map<string, number>
+  globalOpenerCounts?: Map<string, number>,
+  companyName?: string
 ): { subject: string; body: string; voice: ReviewerVoice } {
   const adaptedLangPack = findAdaptedLanguagePack(adaptedPack, language);
   const catContext = !iptvMode
@@ -468,6 +470,14 @@ function composeCandidateCopy(
     }
   }
 
+  // ~45% chance for service businesses: rich, non-generic 5-part story (problem, action, appointment, resolution, observation/company)
+  if (serviceMode && !iptvMode && stars >= 3 && Math.random() < 0.45) {
+    const story = buildDetailedServiceStory(product, language, stars, companyName);
+    if (story) {
+      return { subject: story.subject, body: story.body, voice: 'technical' };
+    }
+  }
+
   // Merge extra diverse subjects so titles stay varied across large datasets
   const extraSubs = EXTRA_DIVERSE_SUBJECTS[language]?.[stars] || [];
   const mergedSubjects = extraSubs.length > 0 ? [...subjects, ...extraSubs] : subjects;
@@ -530,7 +540,8 @@ function composeUniqueReviewCopy(
   productUsedSubjects: Set<string>,
   serviceMode = false,
   globalSubjectCounts?: Map<string, number>,
-  globalOpenerCounts?: Map<string, number>
+  globalOpenerCounts?: Map<string, number>,
+  companyName?: string
 ): { subject: string; body: string; voice: ReviewerVoice } {
   // Phase 1: Up to 30 organic compositions with unique body + unique per-product subject
   for (let attempt = 0; attempt < 30; attempt++) {
@@ -545,7 +556,8 @@ function composeUniqueReviewCopy(
       attempt >= 10,
       serviceMode,
       globalSubjectCounts,
-      globalOpenerCounts
+      globalOpenerCounts,
+      companyName
     );
     const normBody = normalizeReviewBody(candidate.body);
     const normSubj = normalizeReviewBody(candidate.subject);
@@ -831,6 +843,7 @@ export function generateReviewDataset(
 
   const iptvMode = !adaptedPack && isIPTVCatalog(products);
   const serviceMode = !iptvMode && isServiceCatalog(products);
+  const companyName = adaptedPack?.detectedBusinessName || config.storeBaseUrl?.replace(/^https?:\/\/(www\.)?/i, '').split('/')[0] || '';
   const startMs = Date.parse(config.dateStart) || Date.now() - 180 * 86400000;
   const endMs = Math.max(startMs + 86400000, Date.parse(config.dateEnd) || Date.now());
 
@@ -972,7 +985,8 @@ export function generateReviewDataset(
         productUsedSubjects,
         serviceMode,
         globalSubjectCounts,
-        globalOpenerCounts
+        globalOpenerCounts,
+        companyName
       );
 
       emailFrequency.set(chosenEmail, (emailFrequency.get(chosenEmail) || 0) + 1);

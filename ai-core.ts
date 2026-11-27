@@ -777,8 +777,14 @@ ${formatted}
 
 RULES:
 - Write in the EXACT language code specified (e.g. nl = natural Belgian/Dutch, fr = natural French, en = natural English, darija_latin = Moroccan Darija in Latin script).
-- Make every review sound genuinely human: vary lengths (some ultra-short 5–12 words, some 1–2 casual sentences, some 3 detailed sentences), use diverse titles, and include occasional natural human quirks (casual phrasing, minor phone typos like "reccomend"/"tres"/"rdv", occasional lowercase or missing final period in ~20% of reviews).
-- Match the EXACT offering/service (e.g. boiler repair mentions heating/hot water/pressure, leak repair mentions pipes/sink).
+- To avoid generic reviews, weave concrete real-life details naturally into medium/detailed reviews:
+  1) What problem the customer experienced (e.g. boiler losing pressure, leak under sink, heating cut out)
+  2) What the technician actually did (e.g. replaced worn valve, checked sensor, sealed cracked joint)
+  3) How the appointment went (e.g. texted 15 mins before, arrived in window, clear quote upfront)
+  4) Whether the problem was resolved (e.g. running steadily for weeks, zero drips since)
+  5) 1–2 personal observations (e.g. wiped the floor clean, showed how to check pressure, no pushy upselling)
+  6) Mention the SPECIFIC company name in ~40% of rewritten reviews so they clearly belong to this business and not any generic company!
+- Still vary lengths naturally (some ultra-short 5–12 words, some 1–2 sentences, some detailed 3–4 sentences), use diverse titles, and include occasional natural human quirks (~20%: minor phone typos like "reccomend"/"tres"/"rdv", occasional lowercase or missing final period).
 - PRESERVE negative/mixed 1–3 star reviews honestly (minor scheduling wait, slight preference mismatch — never scam/fraud allegations).`;
 
   const { data, usage } = await generateJsonWithAI<{

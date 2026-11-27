@@ -336,3 +336,265 @@ export function applyHumanImperfections(
 
   return { subject: nextSubject, body: nextBody };
 }
+
+interface ServiceStoryParts {
+  problem: string[];
+  action: string[];
+  appointment: string[];
+  resolution: string[];
+  observation: string[];
+  companyMentions: string[];
+}
+
+function cleanCompanyName(raw?: string): string {
+  if (!raw) return '';
+  const cleaned = raw
+    .replace(/\(built-in\)/gi, '')
+    .replace(/custom business catalog/gi, '')
+    .replace(/^www\./i, '')
+    .replace(/\.(com|be|nl|fr|org|net|io)$/i, '')
+    .replace(/[-_]+/g, ' ')
+    .trim();
+  if (cleaned.length < 2 || cleaned.length > 48) return '';
+  return cleaned.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function getServiceStoryBank(
+  product: CatalogProduct,
+  language: ReviewLanguage
+): ServiceStoryParts {
+  const haystack = `${product.item_name} ${product.item_slug} ${product.category}`.toLowerCase();
+  const isBoiler = /boiler|heat|chauffage|verwarming|ketel|warm|hot water|bulex|vaillant|radiator|thermostat/i.test(haystack);
+  const isLeak = /leak|lek|fuite|plumb|plombier|loodgieter|pipe|drain|sink|toilet|tap|faucet|water/i.test(haystack);
+
+  if (language === 'fr') {
+    return {
+      problem: isBoiler
+        ? [
+            'Notre chaudière perdait de la pression chaque nuit et on n’avait plus d’eau chaude le matin.',
+            'Le chauffage s’est coupé d’un coup avec un code d’erreur en plein week-end.',
+            'Les radiateurs restaient tièdes malgré le thermostat à fond.',
+          ]
+        : isLeak
+        ? [
+            'Une fuite sous l’évier de la cuisine commençait à gonfler le meuble.',
+            'Un tuyau derrière les toilettes gouttait sans arrêt depuis deux jours.',
+            'La pression d’eau avait chuté brusquement dans toute la salle de bain.',
+          ]
+        : [
+            `On avait un souci urgent qui nécessitait une intervention pour ${product.item_name}.`,
+            `Le problème durait depuis plusieurs jours avant qu’on appelle pour ${product.item_name}.`,
+          ],
+      action: isBoiler
+        ? [
+            'Le technicien a contrôlé le vase d’expansion, nettoyé le brûleur et changé la vanne usée en moins d’une heure.',
+            'Il a purgé le circuit, remplacé le capteur défectueux et testé l’eau chaude sur chaque robinet.',
+          ]
+        : isLeak
+        ? [
+            'Le plombier a trouvé le joint fissuré sans casser le coffrage et a refait le raccord proprement.',
+            'Il a remplacé la pièce défectueuse et vérifié l’étanchéité sous pression pendant dix minutes.',
+          ]
+        : [
+            'Le technicien a fait un diagnostic complet avant d’intervenir et a réglé le souci sur place avec les pièces de son camion.',
+            'Il a tout vérifié étape par étape et nous a expliqué exactement ce qui posait problème.',
+          ],
+      appointment: [
+        'Il a appelé 15 minutes avant d’arriver et nous a montré le devis clair avant de commencer.',
+        'Rendez-vous pris rapidement, arrivé pile dans le créneau annoncé avec tout le matériel.',
+        'Prise de rdv simple par téléphone et passage le jour même comme promis.',
+      ],
+      resolution: [
+        'Depuis son passage, tout tourne sans le moindre souci.',
+        'Problème réglé dès la première visite, plus aucune panne depuis trois semaines.',
+        'Tout refonctionne normalement et la pression reste parfaitement stable.',
+      ],
+      observation: [
+        'J’ai vraiment apprécié qu’il protège le sol et prenne 5 minutes pour me montrer comment surveiller la pression.',
+        'Pas de vente forcée, juste des conseils honnêtes et un chantier laissé nickel.',
+        'Rare de tomber sur quelqu’un d’aussi calme et pédagogue.',
+      ],
+      companyMentions: [
+        'C’était notre première fois avec {company} et on garde clairement leur numéro.',
+        'Je comprends pourquoi nos voisins nous ont conseillé {company}.',
+        'Franchement, l’équipe de {company} fait la différence par son sérieux.',
+      ],
+    };
+  }
+
+  if (language === 'nl') {
+    return {
+      problem: isBoiler
+        ? [
+            'Onze ketel verloor elke nacht druk en ’s ochtends hadden we geen warm water meer.',
+            'De verwarming viel plots uit met een foutcode net toen het koud werd.',
+            'De radiatoren bleven lauw terwijl de ketel vreemde geluiden maakte.',
+          ]
+        : isLeak
+        ? [
+            'Een klein lek onder de keukenkraan maakte het hele kastje nat.',
+            'De leiding achter het toilet bleef druppelen en we kregen het zelf niet dicht.',
+            'De waterdruk viel ineens weg in de badkamer.',
+          ]
+        : [
+            `We zaten met een dringend probleem waarvoor we ${product.item_name} nodig hadden.`,
+            `Na dagen twijfelen toch gebeld voor ${product.item_name}.`,
+          ],
+      action: isBoiler
+        ? [
+            'De technieker heeft het expansievat nagekeken, een versleten klep vervangen en alles netjes ontlucht.',
+            'Hij heeft de ketel opengemaakt, de sensor vervangen en zowel warm water als verwarming dubbel getest.',
+          ]
+        : isLeak
+        ? [
+            'De loodgieter vond de lekkende koppeling zonder breekwerk en plaatste meteen een nieuwe dichting.',
+            'Hij verving het stuk leiding en testte alle kranen op volle druk voor hij vertrok.',
+          ]
+        : [
+            'De vakman stelde meteen een heldere diagnose en loste het ter plaatse op met onderdelen uit zijn bestelwagen.',
+            'Alles werd stap voor stap nagekeken en netjes hersteld.',
+          ],
+      appointment: [
+        'Hij belde een kwartier vooraf en gaf eerst een duidelijke prijsopgave voor hij begon.',
+        'De afspraak lag snel vast en hij stond stipt binnen het afgesproken tijdslot voor de deur.',
+        'Vlot contact aan de telefoon en dezelfde dag nog iemand langsgekomen.',
+      ],
+      resolution: [
+        'Sinds het bezoek werkt alles weer foutloos zonder één storing.',
+        'Direct opgelost bij de eerste interventie, nu al drie weken geen probleem meer.',
+        'Geen druppel meer gezien en alles draait weer rustig.',
+      ],
+      observation: [
+        'Heel fijn dat hij alles netjes opruimde en me even uitlegde hoe ik zelf de druk kan controleren.',
+        'Geen opdringerige extra kosten, gewoon eerlijk vakwerk.',
+        'Rustige en beleefde monteur die duidelijk weet waar hij mee bezig is.',
+      ],
+      companyMentions: [
+        'Eerste keer dat we {company} belden en hun nummer staat nu vast in mijn telefoon.',
+        'Blij dat we op aanraden van de buren voor {company} hebben gekozen.',
+        'De service van {company} stak er echt bovenuit vergeleken met eerdere ervaringen.',
+      ],
+    };
+  }
+
+  // English (default)
+  return {
+    problem: isBoiler
+      ? [
+          'Our boiler kept losing pressure overnight and we woke up to cold showers twice in a row.',
+          'The heating suddenly cut out with a blinking error code right as the weather turned cold.',
+          'Hot water was going lukewarm after two minutes and the boiler was making a clicking noise.',
+        ]
+      : isLeak
+      ? [
+          'A slow leak under the kitchen sink started soaking the cabinet before we noticed it.',
+          'The pipe behind our upstairs toilet was dripping nonstop and we could not tighten it ourselves.',
+          'Water pressure dropped across the house and we spotted dampness near the main shutoff.',
+        ]
+      : [
+          `We ran into a sudden issue at home and needed ${product.item_name} sorted quickly.`,
+          `Had been putting off ${product.item_name} for weeks until it finally needed proper attention.`,
+        ],
+    action: isBoiler
+      ? [
+          'The technician checked the expansion vessel, swapped out a worn valve, and bled the radiators in under an hour.',
+          'He diagnosed a faulty pressure sensor right away, had the spare part in his van, and tested both heating and hot water.',
+        ]
+      : isLeak
+      ? [
+          'The plumber traced the cracked fitting without cutting into the cabinetry and replaced the joint cleanly.',
+          'He swapped the worn seal, tightened the supply line, and ran every tap to verify zero drips.',
+        ]
+      : [
+          'The technician diagnosed the root cause in ten minutes and fixed it on the spot with parts from his van.',
+          'He walked through the issue step by step, made the repair cleanly, and double-checked everything.',
+        ],
+    appointment: [
+      'He texted 15 minutes before arriving and walked me through the exact quote before touching anything.',
+      'Booking was straightforward and he showed up right inside the morning window with shoe covers.',
+      'Got a same-day slot over the phone and the arrival time was spot on.',
+    ],
+    resolution: [
+      'Everything has been running smoothly for three weeks now with zero issues.',
+      'Problem completely solved on the first visit — huge relief.',
+      'Not a single hiccup since he left, pressure and temperature are back to normal.',
+    ],
+    observation: [
+      'Really appreciated that he wiped down the floor and showed me how to check the gauge myself.',
+      'No pushy upselling at all, just honest advice and tidy workmanship.',
+      'You rarely meet a tradesperson this patient when answering questions.',
+    ],
+    companyMentions: [
+      'First time using {company} and I already saved their number for next year’s checkup.',
+      'Now I see why our neighbors keep recommending {company}.',
+      'Honestly, {company} handled this way better than the last contractor we tried.',
+    ],
+  };
+}
+
+/**
+ * Builds a grounded, non-generic, multi-element service review story covering:
+ * problem -> technician action -> appointment -> resolution -> personal observation / company mention.
+ */
+export function buildDetailedServiceStory(
+  product: CatalogProduct,
+  language: ReviewLanguage,
+  stars: 1 | 2 | 3 | 4 | 5,
+  companyName?: string
+): { subject: string; body: string } | null {
+  if (stars <= 2) return null; // Negative reviews stay realistic scheduling/expectation stories
+  if (!['en', 'fr', 'nl'].includes(language)) return null;
+
+  const bank = getServiceStoryBank(product, language);
+  const company = cleanCompanyName(companyName);
+
+  const parts: string[] = [];
+  // Always ground with problem + what the technician actually did
+  parts.push(pick(bank.problem));
+  parts.push(pick(bank.action));
+
+  // Add appointment OR resolution (or both on ~40% of detailed reviews)
+  const roll = Math.random();
+  if (roll < 0.45) {
+    parts.push(pick(bank.appointment));
+    parts.push(pick(bank.resolution));
+  } else if (roll < 0.75) {
+    parts.push(pick(bank.resolution));
+  } else {
+    parts.push(pick(bank.appointment));
+  }
+
+  // Personal observation or specific company mention (~45% mention the specific company when available)
+  if (company && Math.random() < 0.48) {
+    parts.push(pick(bank.companyMentions).replace(/\{company\}/g, company));
+  } else if (Math.random() < 0.65) {
+    parts.push(pick(bank.observation));
+  }
+
+  const subjectsByLang: Record<string, string[]> = {
+    en: [
+      `Fixed our ${product.item_name.toLowerCase()} fast`,
+      company ? `Great experience with ${company}` : 'Solved on the first visit',
+      'Honest technician, clean work',
+      'Back to normal same day',
+      'No surprises on the quote',
+    ],
+    fr: [
+      `${product.item_name} réglé rapidement`,
+      company ? `Très content de ${company}` : 'Problème réglé dès la première visite',
+      'Technicien honnête et propre',
+      'Intervention claire et efficace',
+    ],
+    nl: [
+      `${product.item_name} snel opgelost`,
+      company ? `Heel tevreden van ${company}` : 'Meteen opgelost bij eerste bezoek',
+      'Eerlijke vakman en net werk',
+      'Duidelijke uitleg en vlot geregeld',
+    ],
+  };
+
+  const subject = pick(subjectsByLang[language] || subjectsByLang.en);
+  const body = parts.join(' ');
+  return applyHumanImperfections(subject, body, language);
+}
+
