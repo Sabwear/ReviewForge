@@ -42,7 +42,7 @@ export function TopBar({
     EXPORT_FORMAT_OPTIONS.find((f) => f.id === exportFormat) ?? EXPORT_FORMAT_OPTIONS[0];
 
   return (
-    <header className="sticky top-0 z-30 bg-white/85 dark:bg-slate-950/80 backdrop-blur-xl border-b border-slate-200/80 dark:border-slate-800/80 transition-colors duration-200">
+    <header className="sticky top-0 z-30 bg-white/85 dark:bg-[#161920]/90 backdrop-blur-xl border-b border-slate-200/80 dark:border-white/[0.08] transition-colors duration-200">
       <div className="max-w-[1680px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3 sm:gap-6">
         {/* Zone 1: Brand mark & wordmark */}
         <a
@@ -59,7 +59,7 @@ export function TopBar({
         {/* Zone 2: Pill-framed navigation links */}
         <nav
           aria-label="Primary"
-          className="flex items-center gap-1 p-1 rounded-xl bg-slate-100/85 dark:bg-slate-900/90 border border-slate-200/70 dark:border-slate-800/90 overflow-x-auto"
+          className="flex items-center gap-1 p-1 rounded-xl bg-slate-100/85 dark:bg-[#1C2029] border border-slate-200/70 dark:border-white/[0.07] overflow-x-auto"
         >
           {navItems.map((item) => {
             const isActive = activeTab === item.id;
@@ -68,10 +68,10 @@ export function TopBar({
                 key={item.id}
                 type="button"
                 onClick={() => onTabChange(item.id)}
-                className={`relative px-3.5 py-1.5 text-sm font-medium rounded-lg transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${
+                className={`relative px-3.5 py-1.5 text-sm font-medium rounded-lg transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#68AEE0] ${
                   isActive
-                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm ring-1 ring-slate-200/70 dark:ring-slate-700/80'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                    ? 'bg-white dark:bg-[#232834] text-slate-900 dark:text-[#E4E6EB] shadow-sm ring-1 ring-slate-200/70 dark:ring-white/[0.10]'
+                    : 'text-slate-600 dark:text-[#E4E6EB]/65 hover:text-slate-900 dark:hover:text-[#E4E6EB]'
                 }`}
               >
                 {item.label}

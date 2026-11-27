@@ -13,14 +13,14 @@ export function ThemeSwitcher({ theme, onChange }: ThemeSwitcherProps) {
     <div
       role="group"
       aria-label="Color theme"
-      className="relative inline-flex items-center p-1 rounded-full bg-slate-100 dark:bg-slate-800/90 border border-slate-200/90 dark:border-slate-700/80 shadow-inner"
+      className="relative inline-flex items-center p-1 rounded-full bg-slate-100 dark:bg-[#1C2029] border border-slate-200/90 dark:border-white/[0.08] shadow-inner"
     >
       {/* Animated sliding pill */}
       <span
         aria-hidden="true"
         className={`pointer-events-none absolute top-1 bottom-1 left-1 w-8 rounded-full transition-all duration-300 ease-out shadow-sm ${
           isDark
-            ? 'translate-x-8 bg-slate-950 ring-1 ring-sky-400/35 shadow-sky-500/20'
+            ? 'translate-x-8 bg-[#232834] ring-1 ring-white/[0.12]'
             : 'translate-x-0 bg-white ring-1 ring-slate-200/80 shadow-amber-500/15'
         }`}
       />

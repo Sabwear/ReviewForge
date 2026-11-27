@@ -578,7 +578,7 @@ export default function App() {
   }, []);
 
   return (
-    <div id="top" className="min-h-screen flex flex-col bg-[#F8FAFC] dark:bg-[#070B14] text-slate-900 dark:text-slate-100 transition-colors duration-200">
+    <div id="top" className="min-h-screen flex flex-col bg-[#F8FAFC] dark:bg-[#0F1115] text-slate-900 dark:text-[#E4E6EB] transition-colors duration-200">
       <TopBar
         activeTab={activeTab}
         onTabChange={setActiveTab}
