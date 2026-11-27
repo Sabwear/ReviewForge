@@ -22,6 +22,8 @@ import {
   EXPORT_FORMAT_OPTIONS,
   GeneratedReview,
   GeneratorConfig,
+  LANGUAGE_OPTIONS,
+  ReviewLanguage,
   ReviewTemplate,
   SampleBusinessId,
   WebsiteScanResponse,
@@ -40,6 +42,26 @@ import {
 
 const AUDIT_MAP_STORAGE_KEY = 'reviewforge-ai-audit-map-v1';
 const AUDIT_RUNS_STORAGE_KEY = 'reviewforge-ai-audit-runs-v1';
+const SAVED_LANGUAGES_KEY = 'reviewforge-selected-languages-v1';
+
+const VALID_LANGUAGE_CODES = new Set<string>(LANGUAGE_OPTIONS.map((l) => l.code));
+
+function loadSavedLanguages(): ReviewLanguage[] {
+  const fallback: ReviewLanguage[] = ['en', 'fr', 'darija_latin', 'ar'];
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const raw = window.localStorage.getItem(SAVED_LANGUAGES_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return fallback;
+    const valid = parsed.filter(
+      (code): code is ReviewLanguage => typeof code === 'string' && VALID_LANGUAGE_CODES.has(code)
+    );
+    return valid.length > 0 ? valid : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 function loadSavedAuditMap(): Record<string, ReviewAuditEntry> {
   if (typeof window === 'undefined') return {};
@@ -108,7 +130,7 @@ export default function App() {
   const initialConfig: GeneratorConfig = useMemo(
     () => ({
       selectedCategories: [],
-      selectedLanguages: ['en', 'fr', 'darija_latin', 'ar'],
+      selectedLanguages: loadSavedLanguages(),
       excludeByKeywords: false,
       excludeKeywords: 'test, trial, sample',
       exportFormat: 'judge_me',
@@ -150,6 +172,14 @@ export default function App() {
   const [isAuditingReviews, setIsAuditingReviews] = useState(false);
   const [isRewritingReviews, setIsRewritingReviews] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SAVED_LANGUAGES_KEY, JSON.stringify(config.selectedLanguages));
+    } catch {
+      // ignore storage errors
+    }
+  }, [config.selectedLanguages]);
 
   useEffect(() => {
     try {
