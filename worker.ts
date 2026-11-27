@@ -35,6 +35,7 @@ interface Env extends ServerAIEnv {
 const ALLOWED_LANGUAGES = new Set([
   'en', 'fr', 'es', 'de', 'it', 'pt', 'nl', 'ar', 'darija_latin',
   'tr', 'ru', 'zh', 'ja', 'ko', 'hi', 'pl',
+  'sv', 'no', 'da', 'el', 'ro', 'cs', 'uk', 'id', 'vi', 'th', 'ms', 'he',
 ]);
 
 const json = (body: unknown, status = 200) =>

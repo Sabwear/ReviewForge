@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { CORE_TARGET_CATEGORIES, SAMPLE_BUSINESSES } from '../data/sampleCatalog';
 import { isIPTVCatalog } from '../data/universalComposer';
+import { FlagBadge } from './FlagBadge';
 import {
   BusinessVoicePack,
   CatalogFormat,
@@ -193,16 +194,39 @@ export function ConfigSidebar({
     });
   };
 
+  const [languageSort, setLanguageSort] = useState<'selected' | 'alpha' | 'region'>('selected');
+
   const filteredLanguageOptions = React.useMemo(() => {
     const q = languageSearch.trim().toLowerCase();
-    if (!q) return LANGUAGE_OPTIONS;
-    return LANGUAGE_OPTIONS.filter(
-      (lang) =>
-        lang.label.toLowerCase().includes(q) ||
-        lang.nativeLabel.toLowerCase().includes(q) ||
-        lang.code.toLowerCase().includes(q)
-    );
-  }, [languageSearch]);
+    const filtered = !q
+      ? [...LANGUAGE_OPTIONS]
+      : LANGUAGE_OPTIONS.filter(
+          (lang) =>
+            lang.label.toLowerCase().includes(q) ||
+            lang.nativeLabel.toLowerCase().includes(q) ||
+            lang.code.toLowerCase().includes(q) ||
+            lang.region.toLowerCase().includes(q)
+        );
+
+    const selectedSet = new Set(config.selectedLanguages);
+    if (languageSort === 'alpha') {
+      return filtered.sort((a, b) => a.label.localeCompare(b.label));
+    }
+    if (languageSort === 'region') {
+      const regionOrder: Record<string, number> = { Global: 0, MENA: 1, Europe: 2, Asia: 3 };
+      return filtered.sort(
+        (a, b) =>
+          (regionOrder[a.region] ?? 9) - (regionOrder[b.region] ?? 9) ||
+          a.label.localeCompare(b.label)
+      );
+    }
+    // 'selected': active languages float to the top, preserving regional priority inside each group
+    return filtered.sort((a, b) => {
+      const aSel = selectedSet.has(a.code) ? 0 : 1;
+      const bSel = selectedSet.has(b.code) ? 0 : 1;
+      return aSel - bSel;
+    });
+  }, [languageSearch, languageSort, config.selectedLanguages]);
 
   const handleFileSelection = (file: File | undefined) => {
     if (file) {
@@ -778,10 +802,10 @@ export function ConfigSidebar({
           </span>
         </div>
         <p className="text-xs text-slate-500 mb-3">
-          Mix any of 16 global languages with native idioms, regional names, and Darija (Latin).
+          Mix any of {LANGUAGE_OPTIONS.length} global languages with native idioms, regional names, and Darija (Latin).
         </p>
 
-        <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg mb-2.5">
+        <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg mb-2">
           <button
             type="button"
             onClick={selectGlobalTop5}
@@ -805,19 +829,31 @@ export function ConfigSidebar({
           </button>
         </div>
 
-        <input
-          type="search"
-          value={languageSearch}
-          onChange={(e) => setLanguageSearch(e.target.value)}
-          placeholder="Filter languages (e.g. German, Japanese, Darija)..."
-          aria-label="Filter languages"
-          className="w-full h-8 px-2.5 mb-2.5 rounded-lg border border-slate-200 bg-slate-50/70 text-xs text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/20"
-        />
+        <div className="flex items-center gap-1.5 mb-2.5">
+          <input
+            type="search"
+            value={languageSearch}
+            onChange={(e) => setLanguageSearch(e.target.value)}
+            placeholder="Filter by language or region (e.g. Swedish, Asia)..."
+            aria-label="Filter languages"
+            className="flex-1 min-w-0 h-8 px-2.5 rounded-lg border border-slate-200 bg-slate-50/70 text-xs text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/20"
+          />
+          <select
+            aria-label="Sort languages"
+            value={languageSort}
+            onChange={(e) => setLanguageSort(e.target.value as 'selected' | 'alpha' | 'region')}
+            className="h-8 px-2 rounded-lg border border-slate-200 bg-slate-50/70 text-[11px] font-medium text-slate-700 focus:border-sky-600 focus:outline-none cursor-pointer shrink-0"
+          >
+            <option value="selected">Selected</option>
+            <option value="alpha">A–Z</option>
+            <option value="region">Region</option>
+          </select>
+        </div>
 
         <div
           role="group"
           aria-label="Review languages"
-          className="divide-y divide-slate-100 border-t border-b border-slate-200 max-h-[256px] overflow-y-auto"
+          className="divide-y divide-slate-100 border-t border-b border-slate-200 max-h-[272px] overflow-y-auto"
         >
           {filteredLanguageOptions.map((lang) => {
             const checked = config.selectedLanguages.includes(lang.code);
@@ -844,9 +880,7 @@ export function ConfigSidebar({
                     onChange={() => toggleLanguage(lang.code)}
                     className="sr-only"
                   />
-                  <span className="text-base leading-none shrink-0" aria-hidden="true">
-                    {lang.flag}
-                  </span>
+                  <FlagBadge countryCode={lang.countryCode} emoji={lang.flag} />
                   <span
                     className={`text-sm truncate ${
                       checked ? 'font-semibold text-slate-900' : 'text-slate-700'

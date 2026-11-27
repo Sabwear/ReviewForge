@@ -40,6 +40,7 @@ app.use(express.json({ limit: '2mb' }));
 const ALLOWED_LANGUAGES = new Set([
   'en', 'fr', 'es', 'de', 'it', 'pt', 'nl', 'ar', 'darija_latin',
   'tr', 'ru', 'zh', 'ja', 'ko', 'hi', 'pl',
+  'sv', 'no', 'da', 'el', 'ro', 'cs', 'uk', 'id', 'vi', 'th', 'ms', 'he',
 ]);
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
 const MAX_FETCH_BYTES = 1_200_000; // 1.2 MB cap per fetched page

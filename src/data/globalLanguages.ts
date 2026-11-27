@@ -2,6 +2,15 @@ import {
   BusinessLanguageTokens,
   BusinessStarPool,
 } from '../types/reviews';
+import {
+  NEW_EXTRA_FALLBACK_REF,
+  NEW_EXTRA_NAMES,
+  NEW_EXTRA_SENTENCE_BANKS,
+  NEW_EXTRA_SURNAMES,
+  NEW_EXTRA_TAILS,
+  NEW_EXTRA_TOKENS,
+  NewExtraLanguage,
+} from './extraLanguagesPack';
 
 export type ExtraGlobalLanguage =
   | 'de'
@@ -14,7 +23,8 @@ export type ExtraGlobalLanguage =
   | 'ja'
   | 'ko'
   | 'hi'
-  | 'pl';
+  | 'pl'
+  | NewExtraLanguage;
 
 export const GLOBAL_EXTRA_NAMES: Record<
   ExtraGlobalLanguage,
@@ -75,6 +85,7 @@ export const GLOBAL_EXTRA_NAMES: Record<
     last: ['nowak', 'kowalski', 'wisniewski', 'wojcik', 'kowalczyk', 'kaminski', 'lewandowski', 'zielinski', 'szymanski', 'dabrowski'],
     domains: ['gmail.com', 'wp.pl', 'onet.pl', 'interia.pl', 'outlook.com'],
   },
+  ...NEW_EXTRA_NAMES,
 };
 
 export const GLOBAL_EXTRA_SURNAMES: Record<ExtraGlobalLanguage, string[]> = {
@@ -89,6 +100,7 @@ export const GLOBAL_EXTRA_SURNAMES: Record<ExtraGlobalLanguage, string[]> = {
   ko: ['Kim', 'Lee', 'Park', 'Choi', 'Jung', 'Kang', 'Cho', 'Yoon', 'Jang', 'Lim'],
   hi: ['Sharma', 'Verma', 'Patel', 'Gupta', 'Mehta', 'Nair', 'Singh', 'Joshi', 'Kapoor', 'Reddy'],
   pl: ['Nowak', 'Kowalski', 'Wiśniewski', 'Wójcik', 'Kowalczyk', 'Kamiński', 'Lewandowski', 'Zieliński', 'Szymański', 'Dąbrowski'],
+  ...NEW_EXTRA_SURNAMES,
 };
 
 export const GLOBAL_EXTRA_FALLBACK_REF: Record<ExtraGlobalLanguage, string> = {
@@ -103,6 +115,7 @@ export const GLOBAL_EXTRA_FALLBACK_REF: Record<ExtraGlobalLanguage, string> = {
   ko: '이 제품',
   hi: 'यह विकल्प',
   pl: 'ten produkt',
+  ...NEW_EXTRA_FALLBACK_REF,
 };
 
 export const GLOBAL_EXTRA_TOKENS: Record<ExtraGlobalLanguage, BusinessLanguageTokens> = {
@@ -172,6 +185,7 @@ export const GLOBAL_EXTRA_TOKENS: Record<ExtraGlobalLanguage, BusinessLanguageTo
     duration: ['dwa tygodnie', 'prawie miesiąc', 'trzy tygodnie', 'kilka dni', 'ponad dwa miesiące'],
     timeframe: ['2 dni', '48 godzin', '3 dni robocze', '24 godziny', 'kilka dni'],
   },
+  ...NEW_EXTRA_TOKENS,
 };
 
 export const GLOBAL_EXTRA_SENTENCE_BANKS: Record<
@@ -972,6 +986,7 @@ export const GLOBAL_EXTRA_SENTENCE_BANKS: Record<
       ],
     },
   },
+  ...NEW_EXTRA_SENTENCE_BANKS,
 };
 
 export const GLOBAL_EXTRA_TAILS: Record<ExtraGlobalLanguage, string[]> = {
@@ -1030,4 +1045,5 @@ export const GLOBAL_EXTRA_TAILS: Record<ExtraGlobalLanguage, string[]> = {
     'Świetnie wpasowało się w codzienne korzystanie.',
     'Bardzo dobre wrażenie od pierwszego dnia.',
   ],
+  ...NEW_EXTRA_TAILS,
 };

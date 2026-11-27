@@ -94,45 +94,78 @@ export type ReviewLanguage =
   | 'en'
   | 'fr'
   | 'es'
+  | 'ar'
+  | 'darija_latin'
   | 'de'
   | 'it'
   | 'pt'
   | 'nl'
-  | 'ar'
-  | 'darija_latin'
   | 'tr'
+  | 'pl'
+  | 'sv'
+  | 'no'
+  | 'da'
+  | 'el'
+  | 'ro'
+  | 'cs'
+  | 'uk'
   | 'ru'
   | 'zh'
   | 'ja'
   | 'ko'
   | 'hi'
-  | 'pl';
+  | 'id'
+  | 'vi'
+  | 'th'
+  | 'ms'
+  | 'he';
+
+export type LanguageRegion = 'Global' | 'MENA' | 'Europe' | 'Asia';
 
 export interface LanguageOption {
   code: ReviewLanguage;
   flag: string;
+  countryCode: string;
   label: string;
   nativeLabel: string;
   dir: 'ltr' | 'rtl';
+  region: LanguageRegion;
 }
 
 export const LANGUAGE_OPTIONS: LanguageOption[] = [
-  { code: 'en', flag: '🇺🇸', label: 'English', nativeLabel: 'English', dir: 'ltr' },
-  { code: 'fr', flag: '🇫🇷', label: 'French', nativeLabel: 'Français', dir: 'ltr' },
-  { code: 'es', flag: '🇪🇸', label: 'Spanish', nativeLabel: 'Español', dir: 'ltr' },
-  { code: 'de', flag: '🇩🇪', label: 'German', nativeLabel: 'Deutsch', dir: 'ltr' },
-  { code: 'it', flag: '🇮🇹', label: 'Italian', nativeLabel: 'Italiano', dir: 'ltr' },
-  { code: 'pt', flag: '🇧🇷', label: 'Portuguese', nativeLabel: 'Português', dir: 'ltr' },
-  { code: 'nl', flag: '🇳🇱', label: 'Dutch', nativeLabel: 'Nederlands', dir: 'ltr' },
-  { code: 'ar', flag: '🇸🇦', label: 'Arabic', nativeLabel: 'العربية', dir: 'rtl' },
-  { code: 'darija_latin', flag: '🇲🇦', label: 'Darija (Latin)', nativeLabel: 'Darija Arabizi', dir: 'ltr' },
-  { code: 'tr', flag: '🇹🇷', label: 'Turkish', nativeLabel: 'Türkçe', dir: 'ltr' },
-  { code: 'ru', flag: '🇷🇺', label: 'Russian', nativeLabel: 'Русский', dir: 'ltr' },
-  { code: 'zh', flag: '🇨🇳', label: 'Chinese', nativeLabel: '中文', dir: 'ltr' },
-  { code: 'ja', flag: '🇯🇵', label: 'Japanese', nativeLabel: '日本語', dir: 'ltr' },
-  { code: 'ko', flag: '🇰🇷', label: 'Korean', nativeLabel: '한국어', dir: 'ltr' },
-  { code: 'hi', flag: '🇮🇳', label: 'Hindi', nativeLabel: 'हिन्दी', dir: 'ltr' },
-  { code: 'pl', flag: '🇵🇱', label: 'Polish', nativeLabel: 'Polski', dir: 'ltr' },
+  // Global & MENA Core
+  { code: 'en', flag: '🇺🇸', countryCode: 'us', label: 'English', nativeLabel: 'English', dir: 'ltr', region: 'Global' },
+  { code: 'fr', flag: '🇫🇷', countryCode: 'fr', label: 'French', nativeLabel: 'Français', dir: 'ltr', region: 'Global' },
+  { code: 'es', flag: '🇪🇸', countryCode: 'es', label: 'Spanish', nativeLabel: 'Español', dir: 'ltr', region: 'Global' },
+  { code: 'ar', flag: '🇸🇦', countryCode: 'sa', label: 'Arabic', nativeLabel: 'العربية', dir: 'rtl', region: 'MENA' },
+  { code: 'darija_latin', flag: '🇲🇦', countryCode: 'ma', label: 'Darija (Latin)', nativeLabel: 'Darija Arabizi', dir: 'ltr', region: 'MENA' },
+  { code: 'he', flag: '🇮🇱', countryCode: 'il', label: 'Hebrew', nativeLabel: 'עברית', dir: 'rtl', region: 'MENA' },
+  { code: 'tr', flag: '🇹🇷', countryCode: 'tr', label: 'Turkish', nativeLabel: 'Türkçe', dir: 'ltr', region: 'MENA' },
+
+  // Europe
+  { code: 'de', flag: '🇩🇪', countryCode: 'de', label: 'German', nativeLabel: 'Deutsch', dir: 'ltr', region: 'Europe' },
+  { code: 'it', flag: '🇮🇹', countryCode: 'it', label: 'Italian', nativeLabel: 'Italiano', dir: 'ltr', region: 'Europe' },
+  { code: 'pt', flag: '🇧🇷', countryCode: 'br', label: 'Portuguese', nativeLabel: 'Português', dir: 'ltr', region: 'Global' },
+  { code: 'nl', flag: '🇳🇱', countryCode: 'nl', label: 'Dutch', nativeLabel: 'Nederlands', dir: 'ltr', region: 'Europe' },
+  { code: 'pl', flag: '🇵🇱', countryCode: 'pl', label: 'Polish', nativeLabel: 'Polski', dir: 'ltr', region: 'Europe' },
+  { code: 'sv', flag: '🇸🇪', countryCode: 'se', label: 'Swedish', nativeLabel: 'Svenska', dir: 'ltr', region: 'Europe' },
+  { code: 'no', flag: '🇳🇴', countryCode: 'no', label: 'Norwegian', nativeLabel: 'Norsk', dir: 'ltr', region: 'Europe' },
+  { code: 'da', flag: '🇩🇰', countryCode: 'dk', label: 'Danish', nativeLabel: 'Dansk', dir: 'ltr', region: 'Europe' },
+  { code: 'el', flag: '🇬🇷', countryCode: 'gr', label: 'Greek', nativeLabel: 'Ελληνικά', dir: 'ltr', region: 'Europe' },
+  { code: 'ro', flag: '🇷🇴', countryCode: 'ro', label: 'Romanian', nativeLabel: 'Română', dir: 'ltr', region: 'Europe' },
+  { code: 'cs', flag: '🇨🇿', countryCode: 'cz', label: 'Czech', nativeLabel: 'Čeština', dir: 'ltr', region: 'Europe' },
+  { code: 'uk', flag: '🇺🇦', countryCode: 'ua', label: 'Ukrainian', nativeLabel: 'Українська', dir: 'ltr', region: 'Europe' },
+  { code: 'ru', flag: '🇷🇺', countryCode: 'ru', label: 'Russian', nativeLabel: 'Русский', dir: 'ltr', region: 'Europe' },
+
+  // Asia
+  { code: 'zh', flag: '🇨🇳', countryCode: 'cn', label: 'Chinese', nativeLabel: '中文', dir: 'ltr', region: 'Asia' },
+  { code: 'ja', flag: '🇯🇵', countryCode: 'jp', label: 'Japanese', nativeLabel: '日本語', dir: 'ltr', region: 'Asia' },
+  { code: 'ko', flag: '🇰🇷', countryCode: 'kr', label: 'Korean', nativeLabel: '한국어', dir: 'ltr', region: 'Asia' },
+  { code: 'hi', flag: '🇮🇳', countryCode: 'in', label: 'Hindi', nativeLabel: 'हिन्दी', dir: 'ltr', region: 'Asia' },
+  { code: 'id', flag: '🇮🇩', countryCode: 'id', label: 'Indonesian', nativeLabel: 'Bahasa Indonesia', dir: 'ltr', region: 'Asia' },
+  { code: 'vi', flag: '🇻🇳', countryCode: 'vn', label: 'Vietnamese', nativeLabel: 'Tiếng Việt', dir: 'ltr', region: 'Asia' },
+  { code: 'th', flag: '🇹🇭', countryCode: 'th', label: 'Thai', nativeLabel: 'ไทย', dir: 'ltr', region: 'Asia' },
+  { code: 'ms', flag: '🇲🇾', countryCode: 'my', label: 'Malay', nativeLabel: 'Bahasa Melayu', dir: 'ltr', region: 'Asia' },
 ];
 
 export interface GeneratedReview {
