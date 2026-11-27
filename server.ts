@@ -28,11 +28,12 @@ import {
   itemsFromLinksAndHeadings,
   mergeItems,
   businessNameFrom,
+  canonicalizeOfferingSlug,
   inferAccurateCategory,
   isValidOfferingName,
   type ScrapedItem,
 } from './scraper.ts';
-import { buildBusinessProfile } from './business-profile.ts';
+import { buildBusinessProfile, normalizeCountryCode } from './business-profile.ts';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1150,23 +1151,25 @@ CRITICAL INSTRUCTIONS:
             };
           })
         : rawChosenItems
+            .map((item, idx) => {
+              const cleanName = String(item.item_name || item.item_slug || '').trim();
+              const slug = canonicalizeOfferingSlug(item.item_slug, cleanName, item.product_url, idx + 1);
+              return { ...item, cleanName, slug };
+            })
             .filter((item) => {
-              const slug = slugifySafe(item.item_slug || item.item_name, 1);
-              if (seenFinalSlugs.has(slug)) return false;
-              seenFinalSlugs.add(slug);
+              if (seenFinalSlugs.has(item.slug)) return false;
+              seenFinalSlugs.add(item.slug);
               return true;
             })
             .slice(0, 24)
             .map((item, idx) => {
-              const slug = slugifySafe(item.item_slug || item.item_name, idx + 1);
-              const cleanName = String(item.item_name || slug).trim();
-              const refinedCat = inferAccurateCategory(cleanName, slug, String(item.category || '').trim());
+              const refinedCat = inferAccurateCategory(item.cleanName, item.slug, String(item.category || '').trim());
               return {
                 item_id: String(idx + 1),
-                item_slug: slug,
-                item_name: cleanName,
+                item_slug: item.slug,
+                item_name: item.cleanName,
                 category: refinedCat,
-                product_url: sanitizeHttpUrl(item.product_url, finalOrigin, slug),
+                product_url: sanitizeHttpUrl(item.product_url, finalOrigin, item.slug),
               };
             });
 
@@ -1196,7 +1199,7 @@ CRITICAL INSTRUCTIONS:
       summary: parsed?.businessSummary,
     });
     const resolvedCountry =
-      (parsed?.detectedCountryCode || '').trim().toUpperCase() ||
+      normalizeCountryCode(parsed?.detectedCountryCode) ||
       builtProfile.detectedCountryCode ||
       undefined;
 

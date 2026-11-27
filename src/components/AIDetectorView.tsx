@@ -109,6 +109,7 @@ interface AIDetectorViewProps {
   onAuditReviews: (target: GeneratedReview[]) => Promise<void>;
   onRewriteFlagged: (target: GeneratedReview[]) => Promise<void>;
   onAutoFixDataset: () => Promise<void>;
+  onSurgicalAuditClean: () => void;
   onRegenerateReview: (reviewId: string) => void;
   onDeleteReview: (reviewId: string) => void;
   onDeleteFlaggedReviews: (ids: string[]) => void;
@@ -155,6 +156,7 @@ export function AIDetectorView({
   onAuditReviews,
   onRewriteFlagged,
   onAutoFixDataset,
+  onSurgicalAuditClean,
   onRegenerateReview,
   onDeleteReview,
   onDeleteFlaggedReviews,
@@ -742,6 +744,17 @@ export function AIDetectorView({
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={reviews.length === 0 || isRewriting || isAuditing}
+                  onClick={onSurgicalAuditClean}
+                  title="Fixes slug typos, service mappings, and title-language mismatches without regenerating customer text, and quarantines templated/contradictory rows to Rejected CSV"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-50 rounded-xl shadow-sm transition-all cursor-pointer"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Surgical Clean (No Rewrite · Preserve Wording)</span>
+                </button>
+
                 {aiOnline && (
                   <button
                     type="button"
@@ -757,7 +770,7 @@ export function AIDetectorView({
                     <span>
                       {isRewriting
                         ? autoFixProgress || 'AI Auto-Fixing…'
-                        : `AI Auto-Fix All Issues (${integrity.flaggedReviewIds.length} flagged)`}
+                        : `AI Auto-Fix Flagged (${integrity.flaggedReviewIds.length})`}
                     </span>
                   </button>
                 )}

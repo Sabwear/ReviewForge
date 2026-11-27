@@ -511,14 +511,14 @@ function composeCandidateCopy(
 
   // ~16% chance of an ultra-short, punchy human review (when not forcing extra tail)
   if (!forceExtraTail && !iptvMode && Math.random() < 0.16) {
-    const ultraShort = buildUltraShortReview(product, language, stars, serviceMode, offeringCtx);
+    const ultraShort = buildUltraShortReview(product, language, stars, serviceMode, offeringCtx, globalUsedSentences);
     if (ultraShort) {
       const humanized = applyHumanImperfections(ultraShort.subject, ultraShort.body, language);
       return { subject: humanized.subject, body: humanized.body, voice: 'minimalist' };
     }
   }
 
-  // ~55% chance for service businesses (or any business with AI offeringContexts): offering-accurate story
+  // ~58% chance for service businesses (or any business with AI offeringContexts): offering-accurate story
   if ((serviceMode || offeringCtx) && !iptvMode && stars >= 4 && Math.random() < 0.58) {
     const story = buildDetailedServiceStory(product, language, stars, companyName, globalUsedSentences, offeringCtx);
     if (story) {
@@ -531,26 +531,27 @@ function composeCandidateCopy(
   const mergedSubjects = extraSubs.length > 0 ? [...subjects, ...extraSubs] : subjects;
   const rawSubject = hydrate(pickLeastUsed(mergedSubjects, globalSubjectCounts));
 
-  // Vary structure naturally: 1-sentence short note (~24%), 2-sentence casual (~50%), 3-sentence detailed (~26%)
+  // Vary structure naturally: always include at least 2 sentences on general openers so we never emit incomplete 1-sentence setup fragments!
   const structureRoll = Math.random();
   const sentences: string[] = [];
-  const chosenOpener = offeringCtx?.scenarios?.length && stars >= 4 && Math.random() < 0.65
+  const chosenOpener = offeringCtx?.scenarios?.length && stars >= 4 && Math.random() < 0.72
     ? pickLeastUsed(offeringCtx.scenarios, globalOpenerCounts)
     : pickLeastUsed(openers, globalOpenerCounts);
 
   // For service businesses, inject a concrete offering-matched detail
   const serviceDetail =
-    (serviceMode || offeringCtx) && !iptvMode && Math.random() < 0.65
+    (serviceMode || offeringCtx) && !iptvMode && Math.random() < 0.7
       ? getServiceSpecificSentence(product, language, stars, offeringCtx)
       : null;
 
-  if (structureRoll < 0.26 && !forceExtraTail) {
-    sentences.push(serviceDetail && Math.random() < 0.45 ? serviceDetail : chosenOpener);
+  if (structureRoll < 0.22 && !forceExtraTail && serviceDetail) {
+    // Self-contained concrete action sentence (never a dangling setup-only opener!)
+    sentences.push(serviceDetail);
   } else if (structureRoll < 0.56) {
     sentences.push(chosenOpener);
     if (serviceDetail) sentences.push(serviceDetail);
     else if (middles.length > 0) sentences.push(pickRandom(middles));
-  } else if (structureRoll < 0.74) {
+  } else if (structureRoll < 0.76) {
     sentences.push(chosenOpener);
     if (closers.length > 0) sentences.push(pickRandom(closers));
   } else {
@@ -558,6 +559,17 @@ function composeCandidateCopy(
     if (serviceDetail) sentences.push(serviceDetail);
     else if (middles.length > 0) sentences.push(pickRandom(middles));
     if (closers.length > 0) sentences.push(pickRandom(closers));
+  }
+
+  // Guard against implausible replacement/installation + "< 1 hour" repair splices!
+  const joinedPreview = sentences.join(' ');
+  if (
+    /\b(replac\w+|new boiler|new heat pump|install\w+|remplac\w+|nouvelle chaudière|vervang\w+|nieuwe\s+\w*ketel)\b/i.test(joinedPreview) &&
+    /\b(less than an hour|under an hour|30 min|moins d’une heure|moins d'une heure|binnen het uur)\b/i.test(joinedPreview) &&
+    sentences.length > 1
+  ) {
+    sentences.splice(1, 1);
+    if (offeringCtx?.outcomes?.length) sentences.push(pickRandom(offeringCtx.outcomes));
   }
 
   if (forceExtraTail && extraTails.length > 0) {
@@ -576,8 +588,23 @@ function composeCandidateCopy(
   return { subject, body, voice };
 }
 
+function extractCandidateSentenceKeys(body: string, product: CatalogProduct, language: ReviewLanguage, offeringCtx?: OfferingVoiceContext | null): string[] {
+  const localPhrase = getLocalizedOfferingPhrase(product, language, offeringCtx).toLowerCase();
+  const itemLower = product.item_name.trim().toLowerCase();
+  return body
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => {
+      let norm = normalizeReviewBody(s);
+      if (localPhrase.length >= 4) norm = norm.split(normalizeReviewBody(localPhrase)).join('[item]');
+      if (itemLower.length >= 4) norm = norm.split(normalizeReviewBody(itemLower)).join('[item]');
+      return norm;
+    })
+    .filter((s) => s.length >= 16);
+}
+
 /**
- * Generates a guaranteed globally-unique review body (zero duplicates across entire dataset).
+ * Generates a guaranteed globally-unique review body AND globally-unique title & sentence clauses
+ * (zero repeated sentences, zero repeated closing fragments, and zero repeated titles across dataset).
  */
 function composeUniqueReviewCopy(
   product: CatalogProduct,
@@ -587,15 +614,21 @@ function composeUniqueReviewCopy(
   adaptedPack: BusinessVoicePack | null,
   iptvMode: boolean,
   globalUsedBodies: Set<string>,
-  productUsedSubjects: Set<string>,
+  globalUsedSubjects: Set<string>,
   serviceMode = false,
   globalSubjectCounts?: Map<string, number>,
   globalOpenerCounts?: Map<string, number>,
   companyName?: string,
   globalUsedSentences?: Set<string>
 ): { subject: string; body: string; voice: ReviewerVoice } {
-  // Phase 1: Up to 30 organic compositions with unique body + unique per-product subject
-  for (let attempt = 0; attempt < 30; attempt++) {
+  const offeringCtx = !iptvMode
+    ? findOfferingVoiceContext(adaptedPack, product.item_slug, language)
+    : null;
+
+  // Phase 1: Up to 45 organic compositions enforcing global body + global title + global per-sentence uniqueness!
+  for (let attempt = 0; attempt < 45; attempt++) {
+    // Snapshot globalUsedSentences so rejected candidates don't pollute the set
+    const sentenceSnapshot = globalUsedSentences ? new Set(globalUsedSentences) : undefined;
     const candidate = composeCandidateCopy(
       product,
       language,
@@ -603,20 +636,27 @@ function composeUniqueReviewCopy(
       customTemplates,
       adaptedPack,
       iptvMode,
-      attempt >= 16,
-      attempt >= 10,
+      attempt >= 24,
+      attempt >= 14,
       serviceMode,
       globalSubjectCounts,
       globalOpenerCounts,
       companyName,
-      globalUsedSentences
+      sentenceSnapshot
     );
     const normBody = normalizeReviewBody(candidate.body);
     const normSubj = normalizeReviewBody(candidate.subject);
+    const sentenceKeys = extractCandidateSentenceKeys(candidate.body, product, language, offeringCtx);
+    const hasRepeatedClause =
+      globalUsedSentences && sentenceKeys.some((k) => globalUsedSentences.has(k));
 
-    if (!globalUsedBodies.has(normBody) && !productUsedSubjects.has(normSubj)) {
+    if (!globalUsedBodies.has(normBody) && !globalUsedSubjects.has(normSubj) && !hasRepeatedClause) {
       globalUsedBodies.add(normBody);
-      productUsedSubjects.add(normSubj);
+      globalUsedSubjects.add(normSubj);
+      if (globalUsedSentences && sentenceSnapshot) {
+        for (const s of sentenceSnapshot) globalUsedSentences.add(s);
+        for (const k of sentenceKeys) globalUsedSentences.add(k);
+      }
       return candidate;
     }
   }
@@ -667,10 +707,6 @@ function composeUniqueReviewCopy(
     (serviceMode ? SERVICE_TOKENS[language] || SERVICE_TOKENS.en : undefined) ||
     UNIVERSAL_COMPOSER_TOKENS[language] ||
     UNIVERSAL_COMPOSER_TOKENS.en;
-
-  const offeringCtx = !iptvMode
-    ? findOfferingVoiceContext(adaptedPack, product.item_slug, language)
-    : null;
 
   for (let extra = 0; extra < 20; extra++) {
     const rawTail = pickRandom(tails);
@@ -771,8 +807,25 @@ const BELGIAN_SURNAMES_NL = [
   'Wouters', 'De Smet', 'Vermeulen', 'Pauwels', 'Aerts', 'Hermans', 'Michiels', 'Vandenberghe',
 ];
 
+function normalizeCountryAlias(raw?: string): string {
+  const s = (raw || '').trim();
+  if (!s) return '';
+  if (/^[A-Za-z]{2}$/.test(s)) return s.toUpperCase() === 'UK' ? 'GB' : s.toUpperCase();
+  if (/belg/i.test(s)) return 'BE';
+  if (/nether|nederland/i.test(s)) return 'NL';
+  if (/france/i.test(s)) return 'FR';
+  if (/german|deutsch/i.test(s)) return 'DE';
+  if (/switz|suisse|schweiz/i.test(s)) return 'CH';
+  if (/united kingdom|britain|england/i.test(s)) return 'GB';
+  if (/moroc|maroc/i.test(s)) return 'MA';
+  if (/spain|espa/i.test(s)) return 'ES';
+  if (/ital/i.test(s)) return 'IT';
+  if (/canad/i.test(s)) return 'CA';
+  return '';
+}
+
 function resolveDomainsForLocale(language: ReviewLanguage, countryCode?: string): string[] {
-  const cc = (countryCode || '').trim().toUpperCase();
+  const cc = normalizeCountryAlias(countryCode);
   if (cc && COUNTRY_EMAIL_DOMAINS[cc]) {
     return COUNTRY_EMAIL_DOMAINS[cc];
   }
@@ -1022,8 +1075,9 @@ export function generateReviewDataset(
     });
   }
 
-  // Global uniqueness & anti-repetition guards
+  // Global uniqueness & anti-repetition guards (body, title, and individual sentences across ALL products!)
   const globalUsedBodies = new Set<string>();
+  const globalUsedSubjects = new Set<string>();
   const globalUsedSentences = new Set<string>();
   const globalSubjectCounts = new Map<string, number>();
   const globalOpenerCounts = new Map<string, number>();
@@ -1034,7 +1088,6 @@ export function generateReviewDataset(
     if (plan.count === 0) continue;
 
     const productKey = `${plan.product.item_id}::${plan.product.item_slug}`;
-    const productUsedSubjects = new Set<string>();
     const productReviews: GeneratedReview[] = [];
 
     for (let i = 0; i < plan.count; i++) {
@@ -1092,7 +1145,7 @@ export function generateReviewDataset(
         adaptedPack,
         iptvMode,
         globalUsedBodies,
-        productUsedSubjects,
+        globalUsedSubjects,
         serviceMode,
         globalSubjectCounts,
         globalOpenerCounts,

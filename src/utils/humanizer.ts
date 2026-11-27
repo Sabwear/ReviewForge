@@ -388,9 +388,25 @@ export function buildUltraShortReview(
   language: ReviewLanguage,
   stars: 1 | 2 | 3 | 4 | 5,
   serviceMode: boolean,
-  offeringCtx?: OfferingVoiceContext | null
+  offeringCtx?: OfferingVoiceContext | null,
+  usedSentences?: Set<string>
 ): { subject: string; body: string } | null {
   const localPhrase = getLocalizedOfferingPhrase(product, language, offeringCtx);
+
+  const pickUnusedPair = (pairs: Array<[string, string]>): { subject: string; body: string } | null => {
+    const unused = usedSentences
+      ? pairs.filter(([, b]) => {
+          const skeleton = b.replace(localPhrase, '[item]').toLowerCase();
+          return !usedSentences.has(skeleton);
+        })
+      : pairs;
+    if (unused.length === 0) return null;
+    const [subject, body] = pick(unused);
+    if (usedSentences) {
+      usedSentences.add(body.replace(localPhrase, '[item]').toLowerCase());
+    }
+    return { subject, body };
+  };
 
   if (serviceMode) {
     if (stars === 5) {
@@ -399,67 +415,86 @@ export function buildUltraShortReview(
           ['Punctual and tidy', `Arrived right on time for ${localPhrase} and left everything spotless.`],
           ['Clear quote, clean work', 'Fair price agreed upfront, polite technician, and everything works properly now.'],
           ['Sorted on the first visit', 'Quick diagnosis, clear explanation, and no mess left behind.'],
-          ['Reliable local team', `Handled ${localPhrase} smoothly from booking to completion.`],
+          ['Straightforward visit', `Handled ${localPhrase} smoothly from booking to completion.`],
+          ['No fuss at all', 'Showed up inside the morning window and finished neatly as quoted.'],
         ],
         fr: [
           ['Ponctuel et soigné', `Horaire respecté pour ${localPhrase} et travail laissé parfaitement propre.`],
           ['Devis respecté', 'Technicien courtois, tarif annoncé à l’avance et intervention efficace.'],
           ['Réglé du premier coup', 'Diagnostic clair sur place et exécution rapide sans mauvaise surprise.'],
-          ['Sérieux et efficace', `Très bon suivi pour ${localPhrase}, rien à redire.`],
+          ['Passage efficace', `Très bon suivi pour ${localPhrase}, rien à signaler.`],
+          ['Travail sérieux', 'Créneau tenu, explications simples et chantier rendu impeccable.'],
         ],
         nl: [
           ['Stipt en verzorgd', `Netjes op tijd gekomen voor ${localPhrase} en alles proper achtergelaten.`],
           ['Correcte prijsafspraak', 'Vriendelijke vakman, duidelijke uitleg vooraf en vlot afgewerkt.'],
           ['Meteen in orde', 'Rustige aanpak, eerlijk advies en meteen goed opgelost bij het eerste bezoek.'],
-          ['Betrouwbare vakman', `Heel vlotte afhandeling voor ${localPhrase}.`],
+          ['Vlotte tussenkomst', `Alles rond ${localPhrase} netjes volgens afspraak verlopen.`],
+          ['Proper vakwerk', 'Op het afgesproken uur aanwezig en zonder gedoe in orde gebracht.'],
         ],
         de: [
           ['Pünktlich und sauber', `Zuverlässiger Termin für ${localPhrase} und faire Abrechnung.`],
           ['Klare Empfehlung', 'Freundlicher Techniker, saubere Ausführung und transparenter Preis.'],
         ],
       };
-      const items = pool[language] || pool.en!;
-      const [subject, body] = pick(items);
-      return { subject, body };
+      return pickUnusedPair(pool[language] || pool.en!);
     }
     if (stars === 4) {
       const pool: Partial<Record<ReviewLanguage, Array<[string, string]>>> = {
         en: [
-          ['Good work overall', `Solid job on ${localPhrase}, even if arrival was about twenty minutes past the window.`],
-          ['Competent technician', 'Workmanship was clean and the quote stayed fair; booking took a couple of days.'],
+          ['Good work overall', `Solid job on ${localPhrase}; traffic pushed arrival back slightly, though he phoned ahead.`],
+          ['Competent technician', 'Workmanship was clean and the invoice matched the estimate after a short wait for a slot.'],
+          ['Tidy execution', `Pleased with ${localPhrase} once we found a mutually free afternoon.`],
         ],
         fr: [
-          ['Bon travail dans l’ensemble', `Prestation sérieuse pour ${localPhrase}, malgré un léger retard annoncé par téléphone.`],
-          ['Intervention propre', 'Travail soigné et tarif respecté, juste un petit délai pour obtenir un créneau.'],
+          ['Bon travail dans l’ensemble', `Prestation sérieuse pour ${localPhrase}, avec un simple appel pour prévenir d’un quart d’heure de retard.`],
+          ['Intervention propre', 'Travail soigné et tarif respecté, juste quelques jours d’attente au planning.'],
+          ['Résultat propre', `Bon passage pour ${localPhrase}, équipe polie et consciencieuse.`],
         ],
         nl: [
-          ['Degelijk uitgevoerd', `Goed geholpen voor ${localPhrase}, al liep het geplande tijdslot een halfuurtje uit.`],
-          ['Tevreden over het vakwerk', 'Keurig werk geleverd tegen de afgesproken prijs, enkel even wachten op een vrij moment.'],
+          ['Degelijk vakwerk', `Goed geholpen bij ${localPhrase}; het duurde enkel een paar dagen voor er plek was.`],
+          ['Nette afwerking', 'Keurig gewerkt tegen de afgesproken prijs, wel een kwartiertje later gestart.'],
+          ['Prima geholpen', `Vriendelijke monteur voor ${localPhrase} en eerlijke afrekening.`],
         ],
       };
-      const items = pool[language] || pool.en!;
-      const [subject, body] = pick(items);
-      return { subject, body };
+      return pickUnusedPair(pool[language] || pool.en!);
     }
     if (stars === 3) {
       const pool: Partial<Record<ReviewLanguage, Array<[string, string]>>> = {
-        en: [['Decent work, slow scheduling', `The technical work for ${localPhrase} was fine, though getting a confirmed time slot took longer than expected.`]],
-        fr: [['Travail correct mais délai long', `L’intervention pour ${localPhrase} a été bien faite, mais il a fallu relancer pour fixer le rendez-vous.`]],
-        nl: [['Werk in orde, planning kon vlotter', `Technisch prima uitgevoerd voor ${localPhrase}, alleen duurde het vrij lang voor de afspraak vastlag.`]],
+        en: [
+          ['Decent work, slow booking', `The technical side of ${localPhrase} was fine, though securing a confirmed date took several days.`],
+          ['Okay once on site', 'Technician knew his trade, but we had to chase the office twice for an arrival window.'],
+          ['Work held up, communication average', `No complaints about the actual work on ${localPhrase}, just wish dispatch updated us sooner.`],
+        ],
+        fr: [
+          ['Travail ok mais délai long', `L’intervention sur ${localPhrase} a été bien menée, mais il a fallu relancer pour fixer la date.`],
+          ['Correct sur place, suivi lent', 'Bon geste technique à domicile, dommage que l’attente téléphonique ait été si longue.'],
+          ['Mitigé sur l’organisation', `Le résultat pour ${localPhrase} convient, même si le créneau initial a glissé en fin de journée.`],
+        ],
+        nl: [
+          ['Technisch goed, trage afstemming', `De uitvoering van ${localPhrase} was prima, al moesten we zelf terugbellen voor een definitief uur.`],
+          ['Degelijk maar lange wachttijd', 'Op het vakwerk zelf valt weinig aan te merken, alleen zat de agenda erg vol die week.'],
+          ['Goed opgelost na uitstel', `Uiteindelijk netjes geholpen voor ${localPhrase}, maar de communicatie vooraf mocht duidelijker.`],
+        ],
       };
-      const items = pool[language] || pool.en!;
-      const [subject, body] = pick(items);
-      return { subject, body };
+      return pickUnusedPair(pool[language] || pool.en!);
     }
     if (stars <= 2) {
       const pool: Partial<Record<ReviewLanguage, Array<[string, string]>>> = {
-        en: [['Appointment rescheduled twice', `Our slot for ${localPhrase} was pushed back twice before someone could attend, which made planning difficult.`]],
-        fr: [['Rendez-vous décalé deux fois', `Le créneau prévu pour ${localPhrase} a été reporté à deux reprises, ce qui est compliqué quand on pose congé.`]],
-        nl: [['Tijdslot twee keer verplaatst', `Onze afspraak voor ${localPhrase} werd helaas twee keer verschoven voordat er iemand kon langskomen.`]],
+        en: [
+          ['Appointment moved twice', `Our slot for ${localPhrase} was pushed back twice before someone attended.`],
+          ['Frustrating wait window', 'Stayed home all morning waiting for a callback when the schedule ran over.'],
+        ],
+        fr: [
+          ['Rendez-vous décalé deux fois', `Le créneau prévu pour ${localPhrase} a été reporté à deux reprises.`],
+          ['Attente compliquée', 'Difficile d’obtenir une heure précise malgré deux appels au secrétariat.'],
+        ],
+        nl: [
+          ['Tijdslot twee keer verplaatst', `Onze afspraak voor ${localPhrase} werd helaas twee keer verschoven.`],
+          ['Lastige planning', 'Een halve dag thuis gewacht voordat duidelijk werd dat het bezoek naar morgen schoof.'],
+        ],
       };
-      const items = pool[language] || pool.en!;
-      const [subject, body] = pick(items);
-      return { subject, body };
+      return pickUnusedPair(pool[language] || pool.en!);
     }
   } else if (stars === 5) {
     const pool: Partial<Record<ReviewLanguage, Array<[string, string]>>> = {
@@ -476,9 +511,7 @@ export function buildUltraShortReview(
         ['Blij met de aankoop', 'Voelt stevig aan in dagelijks gebruik, geen enkel minpunt tot nu toe.'],
       ],
     };
-    const items = pool[language] || pool.en!;
-    const [subject, body] = pick(items);
-    return { subject, body };
+    return pickUnusedPair(pool[language] || pool.en!);
   }
 
   return null;
@@ -486,24 +519,64 @@ export function buildUltraShortReview(
 
 export const EXTRA_DIVERSE_SUBJECTS: Partial<Record<ReviewLanguage, Record<1 | 2 | 3 | 4 | 5, string[]>>> = {
   en: {
-    5: ['Clear diagnosis and tidy work', 'On time and straightforward', 'Solved on the first visit', 'Honest advice, fair quote', 'Clean workmanship', 'Prompt and methodical', 'Smooth appointment from start to finish', 'Very thorough work'],
-    4: ['Good work, slight delay', 'Reliable technician overall', 'Happy with the outcome', 'Clean job once scheduled', 'Fair pricing and polite'],
-    3: ['Fine once booked', 'Work was okay, slow follow-up', 'Competent work but long wait', 'Average scheduling experience'],
-    2: ['Rescheduled twice', 'Wait time was frustrating', 'Hard to get updates before arrival'],
-    1: ['Missed the agreed window', 'Too difficult to confirm a slot'],
+    5: [
+      'Clear diagnosis and tidy work', 'On time and straightforward', 'Solved on the first visit',
+      'Honest advice, fair quote', 'Clean workmanship', 'Prompt and methodical',
+      'Smooth appointment from start to finish', 'Very thorough work', 'Polite technician, zero mess',
+      'Transparent pricing and neat finish', 'Quickly sorted out', 'Dependable local specialist',
+      'Explained everything clearly', 'Properly tested before leaving',
+    ],
+    4: [
+      'Good work, slight delay', 'Competent technician overall', 'Happy with the outcome',
+      'Clean job once scheduled', 'Fair pricing and polite', 'Thorough work after brief wait',
+      'Solid result on site', 'Well handled once booked', 'Careful workmanship', 'Practical advice and tidy job',
+    ],
+    3: [
+      'Fine once booked', 'Work was okay, slow follow-up', 'Competent work but long wait',
+      'Average scheduling experience', 'Good technician, busy dispatch', 'Sorted eventually',
+      'Technical side fine, slow office', 'Took patience to schedule',
+    ],
+    2: ['Rescheduled twice', 'Wait time was frustrating', 'Hard to get updates before arrival', 'Slot shifted late in the day'],
+    1: ['Missed the agreed window', 'Too difficult to confirm a slot', 'Poor scheduling follow-up'],
   },
   fr: {
-    5: ['Diagnostic clair et travail propre', 'Ponctuel et méthodique', 'Réglé dès le premier passage', 'Devis transparent, sans surprise', 'Intervention soignée', 'Explications claires sur place', 'Équipe sérieuse et ponctuelle', 'Travail net et précis'],
-    4: ['Bon travail malgré un léger retard', 'Intervention sérieuse dans l’ensemble', 'Satisfait du résultat final', 'Tarif correct et technicien poli'],
-    3: ['Travail correct mais attente longue', 'Résultat convenable, suivi lent', 'Prestation ok une fois planifiée'],
+    5: [
+      'Diagnostic clair et travail propre', 'Ponctuel et méthodique', 'Réglé dès le premier passage',
+      'Devis transparent, sans surprise', 'Intervention soignée', 'Explications claires sur place',
+      'Équipe sérieuse et ponctuelle', 'Travail net et précis', 'Chantier laissé impeccable',
+      'Tarif respecté et bon contact', 'Prise en charge rapide', 'Intervention efficace à domicile',
+      'Conseils utiles et geste sûr', 'Vérifications complètes avant départ',
+    ],
+    4: [
+      'Bon travail malgré un léger retard', 'Intervention sérieuse dans l’ensemble', 'Satisfait du résultat final',
+      'Tarif correct et technicien poli', 'Travail propre après quelques jours d’attente', 'Bonne exécution sur place',
+      'Devis tenu et travail carré', 'Prestation consciencieuse', 'Bon diagnostic à domicile',
+    ],
+    3: [
+      'Travail correct mais attente longue', 'Résultat convenable, suivi lent', 'Prestation ok une fois planifiée',
+      'Bon technicien, planning compliqué', 'Intervention propre malgré le retard', 'Délai de rendez-vous perfectible',
+    ],
     2: ['Créneau reporté deux fois', 'Délai d’attente contraignant', 'Manque de suivi sur l’horaire'],
     1: ['Plage horaire non respectée', 'Planification trop compliquée'],
   },
   nl: {
-    5: ['Heldere uitleg en net vakwerk', 'Stipt op de afgesproken tijd', 'Meteen verholpen bij eerste bezoek', 'Duidelijke offerte zonder verrassingen', 'Zorgvuldig en proper gewerkt', 'Vriendelijke en kundige technieker', 'Vlotte afspraak en degelijk werk', 'Keurige afwerking'],
-    4: ['Goed vakwerk, iets later dan gepland', 'Over het algemeen heel tevreden', 'Nette uitvoering en eerlijke prijs', 'Betrouwbare aanpak'],
-    3: ['Uitvoering oké, lange wachttijd', 'Degelijk werk maar trage planning', 'Redelijke ervaring zodra ingepland'],
-    2: ['Afspraak twee keer verzet', 'Communicatie over het tijdslot kon beter'],
+    5: [
+      'Heldere uitleg en net vakwerk', 'Stipt op de afgesproken tijd', 'Meteen verholpen bij eerste bezoek',
+      'Duidelijke offerte zonder verrassingen', 'Zorgvuldig en proper gewerkt', 'Vriendelijke en kundige technieker',
+      'Vlotte afspraak en degelijk werk', 'Keurige afwerking', 'Proper gewerkt en eerlijk tarief',
+      'Snel geholpen zonder gedoe', 'Rustige en vakkundige aanpak', 'Grondig nagekeken voor vertrek',
+      'Correcte afspraken en net resultaat', 'Betrouwbare vakman over de vloer',
+    ],
+    4: [
+      'Goed vakwerk, iets later dan gepland', 'Over het algemeen heel tevreden', 'Nette uitvoering en eerlijke prijs',
+      'Betrouwbare aanpak op locatie', 'Zorgvuldig uitgevoerd na korte wachttijd', 'Degelijke tussenkomst',
+      'Prijs volgens afspraak, prima werk', 'Vriendelijke monteur en netjes gewerkt', 'Goed resultaat na inplannen',
+    ],
+    3: [
+      'Uitvoering oké, lange wachttijd', 'Degelijk werk maar trage planning', 'Redelijke ervaring zodra ingepland',
+      'Vakwerk prima, telefonisch druk', 'Goed hersteld na uitgelopen tijdslot', 'Planning kon vlotter',
+    ],
+    2: ['Afspraak twee keer verzet', 'Communicatie over het tijdslot kon beter', 'Lang moeten wachten op bevestiging'],
     1: ['Afgesproken uren niet gehaald', 'Moeilijk om een vast moment te krijgen'],
   },
 };
@@ -560,11 +633,35 @@ function pickUniqueSentence(arr: string[], usedSentences?: Set<string>): string 
   return chosen;
 }
 
+const FOUR_STAR_NUANCES: Record<'en' | 'fr' | 'nl', string[]> = {
+  en: [
+    'Parking on our street delayed the start by fifteen minutes, though he called ahead.',
+    'It took four days to find an open afternoon slot, yet the work itself was faultless.',
+    'Had to wait briefly for a replacement seal from the supplier, otherwise very smooth.',
+    'Phone lines were busy when I first rang, though once booked everything ran like clockwork.',
+    'Slightly pricier than a casual handyman, but the tidy finish justified it.',
+  ],
+  fr: [
+    'La circulation a décalé son arrivée de vingt minutes, mais j’avais été prévenu par SMS.',
+    'L’agenda était complet sur trois jours, en revanche rien à redire sur le soin apporté.',
+    'Il a dû repasser le lendemain matin avec le joint exact, sans facturer le second déplacement.',
+    'Accueil téléphonique un peu débordé le lundi, mais suivi impeccable une fois le créneau fixé.',
+    'Devis légèrement au-dessus de notre première estimation, mais justifié par la propreté du travail.',
+  ],
+  nl: [
+    'Door drukte op de ring was hij twintig minuten later, maar dat liet hij keurig weten.',
+    'We moesten een paar werkdagen geduld hebben voor een vrij moment, verder heel verzorgd.',
+    'Een specifiek koppelstuk moest besteld worden waardoor het een dag opschoof, wel netjes opgelost.',
+    'Telefonisch geraakte ik er eerst moeilijk door, maar het werk zelf was dik in orde.',
+    'Niet de allergoedkoopste offerte, al merk je het verschil meteen aan de nette afwerking.',
+  ],
+};
+
 /**
  * Builds a grounded, non-repetitive, offering-accurate multi-sentence customer review:
  * 1) Prefers AI-scanned `offeringContext` (works dynamically for ANY business/URL!).
  * 2) Falls back to strictly separated sub-archetypes in keyless mode.
- * 3) Enforces star-to-sentiment honesty and caps company-name mentions to <= 12%.
+ * 3) Enforces star-to-sentiment honesty, global sentence uniqueness, and <= 12% company mentions.
  */
 export function buildDetailedServiceStory(
   product: CatalogProduct,
@@ -577,6 +674,7 @@ export function buildDetailedServiceStory(
   if (stars <= 3) return null; // Keep 1-3★ on dedicated neutral/critical paths so 3★ never gets 5★ praise!
 
   const company = cleanCompanyName(companyName);
+  const safeLang = (['en', 'fr', 'nl'].includes(language) ? language : 'en') as 'en' | 'fr' | 'nl';
 
   // Path A: AI-scanned per-offering context (100% tailored to ANY scanned URL & offering!)
   if (
@@ -592,21 +690,18 @@ export function buildDetailedServiceStory(
       const parts = [s1, s2];
       if (s3 && Math.random() < 0.7) parts.push(s3);
       if (stars === 4) {
-        const nuance =
-          language === 'fr'
-            ? 'Il a fallu patienter quelques jours pour avoir un créneau, mais le résultat vaut l’attente.'
-            : language === 'nl'
-            ? 'Het duurde een paar dagen voor er plek was in de agenda, maar het werk zelf is keurig uitgevoerd.'
-            : 'Getting a slot took a couple of days, though the work itself was handled very cleanly.';
+        const nuance = pickUniqueSentence(FOUR_STAR_NUANCES[safeLang], usedSentences);
+        if (!nuance) return null; // Never reuse a 4-star closing sentence across two rows!
         parts.push(nuance);
-      } else if (company && Math.random() < 0.12) {
-        const mention =
+      } else if (company && Math.random() < 0.1) {
+        const mentions =
           language === 'fr'
-            ? `Bon premier contact avec ${company}, nous gardons leurs coordonnées.`
+            ? [`Bon premier contact avec ${company}.`, `Intervention sérieuse de l’équipe ${company}.`]
             : language === 'nl'
-            ? `Fijne eerste ervaring met ${company}.`
-            : `Good first experience with ${company}.`;
-        parts.push(mention);
+            ? [`Fijne eerste ervaring met ${company}.`, `Correct geholpen door ${company}.`]
+            : [`Good first experience with ${company}.`, `Straightforward dealing with ${company}.`];
+        const m = pickUniqueSentence(mentions, usedSentences);
+        if (m) parts.push(m);
       }
       const subjPool = EXTRA_DIVERSE_SUBJECTS[language]?.[stars] || EXTRA_DIVERSE_SUBJECTS.en![stars];
       return applyHumanImperfections(pick(subjPool), parts.join(' '), language);
@@ -805,41 +900,50 @@ export function buildDetailedServiceStory(
     leak_repair: {
       en: {
         scenarios: [
-          'We noticed a damp patch spreading along the hallway wall near the downstairs bathroom.',
-          'Water started pooling inside the kitchen sink cabinet every time the dishwasher drained.',
+          'Our water meter was still spinning slowly with every tap shut off, pointing to a hidden pipe leak.',
+          'A pinhole leak developed on the copper cold-water feed in our basement ceiling.',
+          'Frost had cracked the outdoor garden tap pipework and water began seeping indoors.',
         ],
         actions: [
-          'The plumber pinpointed the weeping copper elbow with acoustic detection, replaced the fitting cleanly, and pressure-tested the pipe.',
-          'He swapped the split drain manifold and perished washer in forty minutes without damaging the cabinetry.',
+          'The plumber isolated the line, cut out the corroded copper section, and soldered a clean replacement sleeve.',
+          'He traced the drop in pressure to a worn stopcock gland and repacked and replaced the valve assembly.',
+          'Fitted an isolation valve alongside the new brass coupling and checked pressure across the ground floor.',
         ],
         outcomes: [
-          'Completely dry ever since and he left a clear report we could forward to our insurer.',
+          'Meter stays completely still overnight now and the cellar floor has dried out.',
+          'Quick, tidy pipework without tearing open unnecessary drywall.',
         ],
       },
       fr: {
         scenarios: [
-          'Une auréole d’humidité apparaissait sur la cloison mitoyenne de la salle de douche.',
-          'De l’eau s’accumulait sous le meuble d’évier à chaque ouverture du robinet.',
+          'Le Té de réglage au pied d’un radiateur du salon suintait sur le parquet depuis plusieurs jours.',
+          'Une fuite lente derrière le bâti des toilettes suspendues humidifiait le bas du couloir.',
+          'Un raccord multicouche sous la baignoire gouttait dès qu’on tirait de l’eau chaude.',
         ],
         actions: [
-          'Le plombier a détecté le raccord fuyard sans démolir le carrelage, refait la soudure et testé la conduite sous pression.',
-          'Remplacement rapide du joint fibre et du flexible abîmé avec vérification complète des évacuations.',
+          'Le plombier a accédé par la trappe de visite, remplacé le raccord serti et vérifié l’étanchéité pendant un quart d’heure.',
+          'Il a vidangé la colonne, changé le coude défectueux et remis l’installation en pression proprement.',
+          'Remplacement de la vanne d’arrêt grippée et réfection complète du joint filasse sans salir la pièce.',
         ],
         outcomes: [
-          'Plus une goutte depuis son passage et rapport d’intervention clair pour notre assurance.',
+          'Aucun suintement depuis deux semaines et le coffrage est resté intact.',
+          'Intervention précise qui nous a évité de déposer le carrelage.',
         ],
       },
       nl: {
         scenarios: [
-          'Er verscheen plots een vochtplek onderaan de muur naast onze badkamer.',
-          'Onder het aanrecht stond telkens een plasje water zodra we de kraan of vaatwasser gebruikten.',
+          'Aan de watercollector in de berging hing plots een constante druppel op één van de koppelingen.',
+          'De aansluiting van de toevoerleiding achter de wasmachine lekte telkens bij het vullen.',
+          'Op zolder merkten we een natte plek op rond een oude knelkoppeling van de koudwaterleiding.',
         ],
         actions: [
-          'Met lekdetectie vond de loodgieter snel de lekkende koppeling zonder tegels uit te breken en herstelde de leiding netjes.',
-          'Hij verving de gescheurde afvoerdichting en versleten flexibele slang en controleerde daarna alle aansluitingen op druk.',
+          'De loodgieter verving de versleten perskoppeling en zette de hele kring tien minuten op testdruk.',
+          'Hij plaatste meteen een nieuwe bolkraan met verse dichtingen en droogde alles netjes na.',
+          'Zonder kap- of breekwerk werd het lekkende T-stuk vernieuwd en elke aansluiting gecontroleerd.',
         ],
         outcomes: [
-          'Sindsdien kurkdroog gebleven en een duidelijk verslag gekregen voor de verzekering.',
+          'Alles is sindsdien kurkdroog gebleven en de werkplek werd netjes achtergelaten.',
+          'Eerlijke afrekening voor de gewerkte tijd en het gebruikte koppelstuk.',
         ],
       },
     },
@@ -917,21 +1021,18 @@ export function buildDetailedServiceStory(
   const parts = [s1, s2];
   if (s3) parts.push(s3);
   if (stars === 4) {
-    parts.push(
+    const nuance = pickUniqueSentence(FOUR_STAR_NUANCES[langKey], usedSentences);
+    if (!nuance) return null; // Never reuse a 4-star closing sentence across two rows!
+    parts.push(nuance);
+  } else if (company && Math.random() < 0.1) {
+    const mentions =
       langKey === 'fr'
-        ? 'Seul petit bémol : un léger décalage d’horaire le matin, mais annoncé par téléphone.'
+        ? [`Bon suivi de la part de ${company}.`, `Contact sérieux chez ${company}.`]
         : langKey === 'nl'
-        ? 'Enige kleine minpuntje was dat het tijdslot iets uitliep, al belden ze netjes vooraf.'
-        : 'Only minor note was a short delay on arrival, though they called ahead to let us know.'
-    );
-  } else if (company && Math.random() < 0.12) {
-    parts.push(
-      langKey === 'fr'
-        ? `Bon suivi de la part de ${company}.`
-        : langKey === 'nl'
-        ? `Correcte opvolging door ${company}.`
-        : `Straightforward experience with ${company}.`
-    );
+        ? [`Correcte opvolging door ${company}.`, `Prettig contact met ${company}.`]
+        : [`Straightforward experience with ${company}.`, `Good communication from ${company}.`];
+    const m = pickUniqueSentence(mentions, usedSentences);
+    if (m) parts.push(m);
   }
 
   const subjPool = EXTRA_DIVERSE_SUBJECTS[language]?.[stars] || EXTRA_DIVERSE_SUBJECTS.en![stars];

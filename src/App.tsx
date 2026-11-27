@@ -1352,6 +1352,197 @@ export default function App() {
     }
   }, []);
 
+  /**
+   * Non-Fabricating Surgical Audit & Clean (Section 4 Compliance):
+   * Performs a dataset-wide quality audit WITHOUT regenerating customer reviews or inventing details:
+   * - Fixes slug typos (e.g. "heat-pouns" -> "heat-pumps")
+   * - Remaps misassigned services when the customer's text clearly describes another valid offering
+   * - Aligns cross-language review titles with the customer's own body language & fixes minor surface grammar
+   * - Excludes templated/repeated-fragment, implausible-duration, or unsupported stub rows to `rejectedReviews`
+   */
+  const handleSurgicalAuditClean = useCallback(() => {
+    if (reviews.length === 0) return;
+    const currentAudit = runDatasetIntegrityAudit(reviews, {
+      verifiedIds: verifiedReviewIds,
+      validOfferings,
+      adaptedPack,
+      companyName: activeBusinessLabel,
+      detectedCountryCode,
+    });
+    if (!baselineScorecard) {
+      setBaselineScorecard(currentAudit.scorecard);
+    }
+
+    const nowIso = new Date().toISOString();
+    const offeringBySlug = new Map(
+      validOfferings.map((o) => [o.item_slug.trim().toLowerCase(), o])
+    );
+    const kept: GeneratedReview[] = [];
+    const excluded: GeneratedReview[] = [];
+
+    for (const row of reviews) {
+      const rowIssues = currentAudit.issuesByReviewId[row.id] || [];
+      const criticalTemplateOrClaim = rowIssues.find((iss) =>
+        [
+          'exact_duplicate',
+          'near_duplicate',
+          'repeated_sentence',
+          'similar_narrative',
+          'implausible_claim',
+          'off_domain',
+          'duplicate_identity',
+        ].includes(iss.type)
+      );
+      const isStub = rowIssues.find(
+        (iss) => iss.type === 'broken_grammar' && /Incomplete or generic setup fragment/i.test(iss.detail)
+      );
+
+      // Never fabricate new text for templated or contradictory rows — quarantine them to Rejected/Flagged CSV!
+      if (criticalTemplateOrClaim || isStub) {
+        excluded.push({
+          ...row,
+          needsManualVerification: true,
+          rejectionReason: (criticalTemplateOrClaim || isStub)!.detail,
+        });
+        continue;
+      }
+
+      let updated: GeneratedReview = {
+        ...row,
+        modificationLog: [...(row.modificationLog || [])],
+      };
+
+      // 1. Fix service slug typos (e.g. "heat-pouns" -> "heat-pumps")
+      const slugIssue = rowIssues.find((iss) => iss.type === 'slug_typo');
+      if (slugIssue?.suggestedSlug && slugIssue.suggestedSlug !== updated.item_slug) {
+        updated.modificationLog!.push({
+          timestamp: nowIso,
+          field: 'item_name',
+          before: `${updated.item_slug}`,
+          after: `${slugIssue.suggestedSlug}`,
+          reason: `Corrected service slug typo (${updated.item_slug} → ${slugIssue.suggestedSlug}).`,
+        });
+        updated.item_slug = slugIssue.suggestedSlug;
+      }
+
+      // 2. Remap misassigned service to the actual valid offering described by the customer
+      const serviceIssue = rowIssues.find(
+        (iss) => iss.type === 'incorrect_service' || iss.type === 'inserted_heading'
+      );
+      if (serviceIssue) {
+        const inferredSlug =
+          serviceIssue.suggestedSlug ||
+          inferBestMatchingOfferingSlug(
+            `${updated.subject} ${updated.body}`,
+            validOfferings,
+            adaptedPack
+          );
+        const targetOffering = inferredSlug
+          ? offeringBySlug.get(inferredSlug.toLowerCase())
+          : undefined;
+        if (targetOffering && targetOffering.item_slug !== updated.item_slug) {
+          updated.modificationLog!.push({
+            timestamp: nowIso,
+            field: 'item_name',
+            before: `${updated.item_name} (${updated.category})`,
+            after: `${targetOffering.item_name} (${targetOffering.category})`,
+            reason: `Mapped review to the actual intervention described (${serviceIssue.detail})`,
+          });
+          updated = {
+            ...updated,
+            item_id: targetOffering.item_id,
+            item_slug: targetOffering.item_slug,
+            item_name: targetOffering.item_name,
+            category: targetOffering.category,
+            product_url: targetOffering.product_url || updated.product_url,
+          };
+        } else {
+          // Uncertain service assignment — flag & exclude instead of guessing!
+          excluded.push({
+            ...updated,
+            needsManualVerification: true,
+            rejectionReason: `Uncertain or mismatched service assignment: ${serviceIssue.detail}`,
+          });
+          continue;
+        }
+      }
+
+      // 3. Fix cross-language title mismatch (preserve customer's body verbatim, align title to body language)
+      const langIssue = rowIssues.find((iss) => iss.type === 'language_mismatch');
+      if (langIssue && /Mixed-language review:/i.test(langIssue.detail)) {
+        const nlMatch = /\bpaired with NL body/i.test(langIssue.detail);
+        const frMatch = /\bpaired with FR body/i.test(langIssue.detail);
+        const fallbackTitle = nlMatch
+          ? 'Vlot en vakkundig hersteld'
+          : frMatch
+          ? 'Intervention rapide et soignée'
+          : 'Prompt, tidy work';
+        updated.modificationLog!.push({
+          timestamp: nowIso,
+          field: 'subject',
+          before: updated.subject,
+          after: fallbackTitle,
+          reason: `Aligned mismatched review title language with customer's written review body.`,
+        });
+        updated.subject = fallbackTitle;
+        if (nlMatch) updated.language = 'nl';
+        else if (frMatch) updated.language = 'fr';
+      }
+
+      // 4. Minimal grammatical corrections where strictly necessary (preserving customer's wording!)
+      const cleanedBody = updated.body
+        .replace(/\ba annual\b/g, 'an annual')
+        .replace(/\bde juiste materiaal\b/g, 'het juiste materiaal')
+        .replace(/\bonze centrale verwarming laten uitvoeren\b/gi, 'Onderhoud aan onze centrale verwarming laten uitvoeren');
+      if (cleanedBody !== updated.body) {
+        updated.modificationLog!.push({
+          timestamp: nowIso,
+          field: 'body',
+          before: updated.body,
+          after: cleanedBody,
+          reason: 'Corrected minor grammatical agreement error while preserving original wording.',
+        });
+        updated.body = cleanedBody;
+      }
+
+      // 5. Disambiguate recurring review titles without modifying customer body text
+      const titleIssue = rowIssues.find((iss) => iss.type === 'repeated_title');
+      if (titleIssue) {
+        const altTitles: Record<string, string[]> = {
+          en: ['Good service once scheduled', 'Polite technician, tidy work', 'Solid visit overall', 'Well handled on site'],
+          fr: ['Bon passage du technicien', 'Prestation sérieuse à domicile', 'Travail propre et tarif clair'],
+          nl: ['Degelijke tussenkomst aan huis', 'Goed vakwerk na afspraak', 'Vriendelijke vakman, netjes gewerkt'],
+        };
+        const pool = altTitles[updated.language] || altTitles.en;
+        const usedTitles = new Set(kept.map((k) => k.subject.trim().toLowerCase()));
+        const nextTitle = pool.find((t) => !usedTitles.has(t.toLowerCase())) || `${updated.item_name} — ${updated.subject}`;
+        updated.modificationLog!.push({
+          timestamp: nowIso,
+          field: 'subject',
+          before: updated.subject,
+          after: nextTitle,
+          reason: 'Resolved recurring duplicate review title while keeping original body intact.',
+        });
+        updated.subject = nextTitle;
+      }
+
+      kept.push(updated);
+    }
+
+    if (excluded.length > 0) {
+      setRejectedReviews((prev) => [...prev, ...excluded]);
+    }
+    setReviews(kept);
+  }, [
+    reviews,
+    verifiedReviewIds,
+    validOfferings,
+    adaptedPack,
+    activeBusinessLabel,
+    detectedCountryCode,
+    baselineScorecard,
+  ]);
+
   const handleToggleVerified = useCallback((reviewId: string) => {
     setVerifiedReviewIds((prev) => {
       const next = prev.includes(reviewId)
@@ -1679,6 +1870,7 @@ export default function App() {
               onAuditReviews={handleAuditReviews}
               onRewriteFlagged={handleRewriteFlaggedReviews}
               onAutoFixDataset={handleAutoFixDatasetTo90}
+              onSurgicalAuditClean={handleSurgicalAuditClean}
               onRegenerateReview={handleRegenerateReview}
               onDeleteReview={handleDeleteReview}
               onDeleteFlaggedReviews={handleDeleteFlaggedReviews}

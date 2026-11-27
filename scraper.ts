@@ -46,6 +46,67 @@ export function slugify(v: string, i: number): string {
   return s || `item-${i}`;
 }
 
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp = Array.from({ length: m + 1 }, (_, i) => i);
+  for (let j = 1; j <= n; j++) {
+    let prev = dp[0];
+    dp[0] = j;
+    for (let i = 1; i <= m; i++) {
+      const temp = dp[i];
+      dp[i] =
+        a[i - 1] === b[j - 1]
+          ? prev
+          : 1 + Math.min(prev, dp[i], dp[i - 1]);
+      prev = temp;
+    }
+  }
+  return dp[m];
+}
+
+/**
+ * Prevents LLM slug typos (e.g. "heat-pouns" when item_name is "Heat pumps" or URL ends in "/heat-pumps"):
+ * 1) Prefers verified leaf slug from an existing subpage URL on the domain when available.
+ * 2) If candidateSlug is a near-miss typo (edit distance 1–3) of slugify(itemName), snaps to slugify(itemName).
+ */
+export function canonicalizeOfferingSlug(
+  candidateSlug: string | undefined,
+  itemName: string,
+  productUrl: string | undefined,
+  fallbackIndex: number
+): string {
+  const nameSlug = slugify(itemName, fallbackIndex);
+  if (productUrl) {
+    try {
+      const u = new URL(productUrl);
+      const nonLoc = nonLocaleSegments(u);
+      if (nonLoc.length >= 2) {
+        const leaf = slugify(nonLoc[nonLoc.length - 1], fallbackIndex);
+        if (leaf && !HUB_INDEX_SLUG.test(leaf)) {
+          // If another offering shares the same URL leaf (e.g. /services/water-heaters vs /solutions/water-heaters),
+          // allow candidateSlug ONLY if it isn't a typo of nameSlug
+          if (!candidateSlug || levenshtein(slugify(candidateSlug, fallbackIndex), leaf) <= 3) {
+            return leaf;
+          }
+        }
+      }
+    } catch {
+      /* ignore invalid URL */
+    }
+  }
+  if (!candidateSlug || !candidateSlug.trim()) return nameSlug;
+  const cleanCandidate = slugify(candidateSlug, fallbackIndex);
+  const dist = levenshtein(cleanCandidate, nameSlug);
+  if (dist >= 1 && dist <= 3 && Math.abs(cleanCandidate.length - nameSlug.length) <= 2) {
+    return nameSlug;
+  }
+  return cleanCandidate;
+}
+
 function titleFromSlug(slug: string): string {
   return decodeURIComponent(slug)
     .replace(/\.[a-z0-9]{2,5}$/i, '')

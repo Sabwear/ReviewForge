@@ -130,6 +130,46 @@ const COUNTRY_NAME_HINTS: Array<[RegExp, string]> = [
   [/\b(canada|toronto|montreal|montréal|vancouver)\b/i, 'CA'],
 ];
 
+const ISO_NAME_TO_CODE: Array<[RegExp, string]> = [
+  [/^(be|bel|belgium|belgi[eë]|belgique)$/i, 'BE'],
+  [/^(nl|nld|netherlands|the netherlands|nederland)$/i, 'NL'],
+  [/^(fr|fra|france)$/i, 'FR'],
+  [/^(de|deu|germany|deutschland)$/i, 'DE'],
+  [/^(ch|che|switzerland|suisse|schweiz)$/i, 'CH'],
+  [/^(gb|uk|gbr|united kingdom|great britain|england)$/i, 'GB'],
+  [/^(ma|mar|morocco|maroc)$/i, 'MA'],
+  [/^(es|esp|spain|espa[nñ]a)$/i, 'ES'],
+  [/^(it|ita|italy|italia)$/i, 'IT'],
+  [/^(pt|prt|portugal)$/i, 'PT'],
+  [/^(lu|lux|luxembourg)$/i, 'LU'],
+  [/^(at|aut|austria|österreich)$/i, 'AT'],
+  [/^(ca|can|canada)$/i, 'CA'],
+  [/^(us|usa|united states)$/i, 'US'],
+  [/^(ae|are|uae|united arab emirates)$/i, 'AE'],
+  [/^(sa|sau|saudi arabia)$/i, 'SA'],
+];
+
+export function normalizeCountryCode(raw?: string): string {
+  const s = (raw || '').trim();
+  if (!s) return '';
+  if (/^[A-Za-z]{2}$/.test(s)) {
+    const up = s.toUpperCase();
+    return up === 'UK' ? 'GB' : up;
+  }
+  const localeMatch = s.match(/^[a-z]{2,3}[-_]([A-Za-z]{2})$/);
+  if (localeMatch) {
+    const up = localeMatch[1].toUpperCase();
+    return up === 'UK' ? 'GB' : up;
+  }
+  for (const [rx, code] of ISO_NAME_TO_CODE) {
+    if (rx.test(s)) return code;
+  }
+  for (const [rx, code] of COUNTRY_NAME_HINTS) {
+    if (rx.test(s)) return code;
+  }
+  return '';
+}
+
 export function inferCountryCodeFromSignals(opts: {
   hostname?: string;
   siteLanguage?: string;

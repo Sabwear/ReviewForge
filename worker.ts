@@ -24,6 +24,7 @@ import {
 } from './scan-core.ts';
 import {
   businessNameFrom,
+  canonicalizeOfferingSlug,
   extractJsonLdItems,
   extractSitemapItems,
   inferAccurateCategory,
@@ -33,7 +34,7 @@ import {
   tryWooCommerce,
   type ScrapedItem,
 } from './scraper.ts';
-import { buildBusinessProfile } from './business-profile.ts';
+import { buildBusinessProfile, normalizeCountryCode } from './business-profile.ts';
 
 interface Env extends ServerAIEnv {
   ASSETS: { fetch(req: Request): Promise<Response> };
@@ -341,22 +342,24 @@ CRITICAL RULES:
             };
           })
         : rawChosenItems
+            .map((item, idx) => {
+              const cleanName = String(item.item_name || item.item_slug || '').trim();
+              const slug = canonicalizeOfferingSlug(item.item_slug, cleanName, item.product_url, idx + 1);
+              return { ...item, cleanName, slug };
+            })
             .filter((item) => {
-              const slug = slugifySafe(item.item_slug || item.item_name, 1);
-              if (seenSlugs.has(slug)) return false;
-              seenSlugs.add(slug);
+              if (seenSlugs.has(item.slug)) return false;
+              seenSlugs.add(item.slug);
               return true;
             })
             .slice(0, 24)
             .map((item, idx) => {
-              const slug = slugifySafe(item.item_slug || item.item_name, idx + 1);
-              const cleanName = String(item.item_name || slug).trim();
               return {
                 item_id: String(idx + 1),
-                item_slug: slug,
-                item_name: cleanName,
-                category: inferAccurateCategory(cleanName, slug, String(item.category || '').trim()),
-                product_url: sanitizeHttpUrl(item.product_url, origin, slug),
+                item_slug: item.slug,
+                item_name: item.cleanName,
+                category: inferAccurateCategory(item.cleanName, item.slug, String(item.category || '').trim()),
+                product_url: sanitizeHttpUrl(item.product_url, origin, item.slug),
               };
             });
 
@@ -387,7 +390,7 @@ CRITICAL RULES:
       summary: parsed?.businessSummary,
     });
     const resolvedCountry =
-      (parsed?.detectedCountryCode || '').trim().toUpperCase() ||
+      normalizeCountryCode(parsed?.detectedCountryCode) ||
       builtProfile.detectedCountryCode ||
       undefined;
 

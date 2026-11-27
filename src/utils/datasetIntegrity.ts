@@ -9,13 +9,17 @@ import { classifyServiceArchetype } from './humanizer';
 export type IntegrityIssueType =
   | 'exact_duplicate'
   | 'near_duplicate'
+  | 'repeated_title'
   | 'repeated_opening'
   | 'repeated_closing'
   | 'repeated_sentence'
+  | 'similar_narrative'
   | 'company_name_stuffing'
   | 'inserted_heading'
+  | 'slug_typo'
   | 'mechanical_service_insertion'
   | 'incorrect_service'
+  | 'implausible_claim'
   | 'uncertain_service'
   | 'off_domain'
   | 'mixed_language_service'
@@ -202,7 +206,49 @@ function splitSentences(text: string): string[] {
   return text
     .split(/(?<=[.!?])\s+/)
     .map((s) => s.trim())
-    .filter((s) => s.length >= 22);
+    .filter((s) => s.length >= 15);
+}
+
+function slugifyCheck(v: string): string {
+  return v
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function levenshteinDist(a: string, b: string): number {
+  if (a === b) return 0;
+  const m = a.length;
+  const n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  const dp = Array.from({ length: m + 1 }, (_, i) => i);
+  for (let j = 1; j <= n; j++) {
+    let prev = dp[0];
+    dp[0] = j;
+    for (let i = 1; i <= m; i++) {
+      const tmp = dp[i];
+      dp[i] = a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[i], dp[i - 1]);
+      prev = tmp;
+    }
+  }
+  return dp[m];
+}
+
+export function detectTitleLanguageHeuristic(title: string): ReviewLanguage | null {
+  const s = title.trim();
+  if (!s) return null;
+  const fr = (s.match(/\b(fuite|réparée|intervention|rapide|pour|une|très|réglé|ponctuel|méthodique|explications|sur|soignée|dépannage|tranquillité|travail|équipe|créneau)\b|[éèêàùç]/gi) || []).length;
+  const nl = (s.match(/\b(werk|orde|kon|vlotter|tevreden|vakwerk|uitgevoerd|prima|voor|de|het|waterlek|snel|opgelost|uitleg|ketel|aanpak|redelijke|ervaring|zodra|ingepland|goed|wachten|nette|eerlijke|prijs)\b/gi) || []).length;
+  const en = (s.match(/\b(reliable|technician|overall|honest|advice|fair|quote|solved|first|visit|clear|work|quick|fix|hot|diagnosis|tidy|resolution|issue|fine|once|booked|good|slight|delay)\b/gi) || []).length;
+  const max = Math.max(fr, nl, en);
+  if (max < 1) return null;
+  if (fr === max && fr > nl && fr > en) return 'fr';
+  if (nl === max && nl > fr && nl > en) return 'nl';
+  if (en === max && en > fr && en > nl) return 'en';
+  return null;
 }
 
 export function detectTextLanguageHeuristic(text: string): ReviewLanguage | null {
@@ -313,11 +359,13 @@ export function runDatasetIntegrityAudit(
     .replace(/\(built-in\)|custom business catalog/gi, '')
     .trim();
 
-  // 1. Exact duplicates, 3-gram Jaccard near-duplicates, identical openings & endings, repeated templates
+  // 1. Exact duplicates, repeated titles, 3-gram Jaccard near-duplicates, 6-word cross-service skeleton clones, identical openings & endings, repeated sentences
   const exactSeen = new Map<string, string>();
+  const titleSeen = new Map<string, string[]>();
   const openingSeen = new Map<string, string[]>();
   const closingSeen = new Map<string, string[]>();
   const templateSeen = new Map<string, string[]>();
+  const sixGramSeen = new Map<string, Array<{ id: string; slug: string; sample: string }>>();
   const wordSets: Array<{ id: string; lang: string; shingles: Set<string>; words: string[] }> = [];
 
   let exactDuplicateCount = 0;
@@ -336,6 +384,28 @@ export function runDatasetIntegrityAudit(
         });
       } else {
         exactSeen.set(normExact, r.id);
+      }
+    }
+
+    const titleWords = normalizeWords(r.subject);
+    if (titleWords.length > 0) {
+      const tKey = titleWords.join(' ');
+      const tList = titleSeen.get(tKey) || [];
+      tList.push(r.id);
+      titleSeen.set(tKey, tList);
+    }
+
+    // Sliding 6-word fragments to catch reusable sentence templates across different services
+    // (e.g. "Technisch prima uitgevoerd voor [X], alleen duurde het vrij lang voor de afspraak vastlag")
+    if (words.length >= 6) {
+      const rowSeen6 = new Set<string>();
+      for (let idx = 0; idx <= words.length - 6; idx++) {
+        const gram = words.slice(idx, idx + 6).join(' ');
+        if (rowSeen6.has(gram)) continue;
+        rowSeen6.add(gram);
+        const list = sixGramSeen.get(gram) || [];
+        list.push({ id: r.id, slug: r.item_slug, sample: gram });
+        sixGramSeen.set(gram, list);
       }
     }
 
@@ -360,6 +430,19 @@ export function runDatasetIntegrityAudit(
       const list = templateSeen.get(key) || [];
       list.push(r.id);
       templateSeen.set(key, list);
+    }
+  }
+
+  for (const [tKey, ids] of titleSeen.entries()) {
+    if (ids.length > 1) {
+      for (const id of ids.slice(1)) {
+        addIssue({
+          reviewId: id,
+          type: 'repeated_title',
+          severity: 'warning',
+          detail: `Recurring review title (${ids.length}× across dataset): "${tKey}".`,
+        });
+      }
     }
   }
 
@@ -423,7 +506,45 @@ export function runDatasetIntegrityAudit(
           reviewId: id,
           type: 'repeated_sentence',
           severity: 'critical',
-          detail: `Repeated sentence template (${ids.length}×): "${tpl.slice(0, 52)}…"`,
+          detail: `Identical reusable sentence (${ids.length}×): "${tpl.slice(0, 56)}…"`,
+        });
+      }
+    }
+  }
+
+  // Flag reusable sentence fragments: >= 6 consecutive words across DIFFERENT services, or >= 8 consecutive words on same service
+  for (const [gram, entries] of sixGramSeen.entries()) {
+    const distinctIds = Array.from(new Set(entries.map((e) => e.id)));
+    const distinctSlugs = new Set(entries.map((e) => e.slug));
+    if (distinctIds.length > 1 && distinctSlugs.size > 1) {
+      for (const id of distinctIds.slice(1)) {
+        if (!repeatedIds.has(id)) {
+          repeatedIds.add(id);
+          addIssue({
+            reviewId: id,
+            type: 'repeated_sentence',
+            severity: 'critical',
+            detail: `Reusable sentence fragment shared across different services: "…${gram}…"`,
+          });
+        }
+      }
+    }
+  }
+
+  // Detect cross-language narrative clones (e.g. multiple rows mentioning insurance reports or under-sink dishwasher puddles)
+  const narrativeMotifs: Array<[string, RegExp]> = [
+    ['insurance report leak claim', /\b(insurer|insurance|verzekering|assurance)\b/i],
+    ['under-sink dishwasher/cabinet puddle', /\b(kitchen sink cabinet|onder het aanrecht|sous le meuble d’évier|under the sink)\b/i],
+  ];
+  for (const [motifLabel, rx] of narrativeMotifs) {
+    const matchingIds = reviews.filter((r) => rx.test(r.body)).map((r) => r.id);
+    if (matchingIds.length > 2) {
+      for (const id of matchingIds.slice(2)) {
+        addIssue({
+          reviewId: id,
+          type: 'similar_narrative',
+          severity: 'warning',
+          detail: `Repeated technical narrative motif (${matchingIds.length}× across languages): ${motifLabel}.`,
         });
       }
     }
@@ -583,6 +704,41 @@ export function runDatasetIntegrityAudit(
       });
     }
 
+    // 4a-bis. Service slug typo check (e.g., "heat-pouns" when item_name is "Heat pumps")
+    const expectedSlug = slugifyCheck(itemTrimmed);
+    const actualSlug = r.item_slug.trim().toLowerCase();
+    if (expectedSlug && actualSlug && expectedSlug !== actualSlug) {
+      const dist = levenshteinDist(actualSlug, expectedSlug);
+      if (dist >= 1 && dist <= 3 && Math.abs(actualSlug.length - expectedSlug.length) <= 2) {
+        insertedHeadingCount += 1;
+        addIssue({
+          reviewId: r.id,
+          type: 'slug_typo',
+          severity: 'critical',
+          detail: `Service slug typo "${r.item_slug}" does not match "${itemTrimmed}" (expected "${expectedSlug}").`,
+          suggestedSlug: expectedSlug,
+        });
+      }
+    }
+
+    // 4a-ter. Implausible technical / duration claim (e.g., replacing an entire boiler in < 1 hour)
+    if (
+      /\b(replac\w+\s+(our|my|the|an)\s+(old\s+)?(boiler|heating|heat pump)|remplac\w+\s+(notre|l['’])\s*(ancienne\s+)?chaudière|vervang\w+\s+van\s+(onze|een)\s+\w*ketel)\b/i.test(
+        combined
+      ) &&
+      /\b(less than an hour|under an hour|in 30 min|en moins d['’]une heure|binnen het uur|in een halfuur)\b/i.test(
+        combined
+      )
+    ) {
+      incorrectServiceCount += 1;
+      addIssue({
+        reviewId: r.id,
+        type: 'implausible_claim',
+        severity: 'critical',
+        detail: 'Implausible technical/duration claim: full boiler/system replacement cannot be completed in under an hour.',
+      });
+    }
+
     // 4b. Company-name repetition / promotional title stuffing
     if (companyRx && companyRx.test(combined)) {
       seenCompanyMentions += 1;
@@ -612,22 +768,26 @@ export function runDatasetIntegrityAudit(
     const bodyWordCount = r.body.trim().split(/\s+/).filter(Boolean).length;
     const isIncompleteStub =
       bodyWordCount < 5 ||
-      /\b(had dringend hulp nodig bij vragen over|required an immediate intervention\.|une fuite d'eau importante est apparue sous notre évier\.)$/i.test(
+      /\b(had dringend hulp nodig bij vragen over|required an immediate intervention\.|une fuite d'eau importante est apparue sous notre évier\.|required professional product insights\.|nous avons fait confiance à [^.]+\.)$/i.test(
         r.body.trim()
       );
+    const hasGrammarSlip =
+      /\b(a annual|de juiste materiaal|onze centrale verwarming laten uitvoeren)\b/i.test(r.body);
 
-    if (hasPlaceholder || hasDupWord || hasBadPunct || hasCapitalSplice || isIncompleteStub) {
+    if (hasPlaceholder || hasDupWord || hasBadPunct || hasCapitalSplice || isIncompleteStub || hasGrammarSlip) {
       brokenGrammarCount += 1;
       addIssue({
         reviewId: r.id,
         type: 'broken_grammar',
-        severity: 'critical',
+        severity: isIncompleteStub || hasPlaceholder || hasCapitalSplice ? 'critical' : 'warning',
         detail: hasPlaceholder
           ? 'Unreplaced template placeholder found in review text.'
           : hasCapitalSplice
           ? 'Broken mid-sentence capital splice from mechanical template assembly.'
           : isIncompleteStub
-          ? 'Incomplete fragment — states a problem without describing any outcome.'
+          ? 'Incomplete or generic setup fragment — states an intent/problem without concrete intervention details.'
+          : hasGrammarSlip
+          ? 'Grammatical agreement or awkward phrasing error detected.'
           : hasDupWord
           ? 'Repeated consecutive word (broken grammar).'
           : 'Malformed punctuation or spacing splice.',
@@ -683,15 +843,24 @@ export function runDatasetIntegrityAudit(
       }
     }
 
-    // 4f. Written text language vs declared language tag mismatch
-    const detectedLang = detectTextLanguageHeuristic(r.body);
-    if (detectedLang && ['en', 'fr', 'nl'].includes(r.language) && detectedLang !== r.language) {
+    // 4f. Written text language vs declared language tag AND Subject-vs-Body cross-language mismatch!
+    const detectedBodyLang = detectTextLanguageHeuristic(r.body);
+    const detectedTitleLang = detectTitleLanguageHeuristic(r.subject);
+    if (detectedBodyLang && detectedTitleLang && detectedBodyLang !== detectedTitleLang) {
       languageMismatchCount += 1;
       addIssue({
         reviewId: r.id,
         type: 'language_mismatch',
         severity: 'critical',
-        detail: `Review is tagged as ${r.language.toUpperCase()} but written in ${detectedLang.toUpperCase()}.`,
+        detail: `Mixed-language review: ${detectedTitleLang.toUpperCase()} title ("${r.subject}") paired with ${detectedBodyLang.toUpperCase()} body.`,
+      });
+    } else if (detectedBodyLang && ['en', 'fr', 'nl'].includes(r.language) && detectedBodyLang !== r.language) {
+      languageMismatchCount += 1;
+      addIssue({
+        reviewId: r.id,
+        type: 'language_mismatch',
+        severity: 'critical',
+        detail: `Review is tagged as ${r.language.toUpperCase()} but written in ${detectedBodyLang.toUpperCase()}.`,
       });
     } else if (r.language === 'nl' && FRENCH_TEXT_MARKERS.test(r.body) && !DUTCH_TEXT_MARKERS.test(r.body)) {
       languageMismatchCount += 1;
@@ -830,6 +999,10 @@ export function runDatasetIntegrityAudit(
         mismatchDetail = `Assigned to "${r.item_name}" (water leak repair) but describes boiler/heating equipment.`;
       } else if (arch === 'water_heater' && (mentionsAcuteBreakdown || mentionsPipeOrSinkLeak) && !/\b(hot water|eau chaude|warm water|chauffe-eau|water heater|warmwater)\b/i.test(bodyLower)) {
         mismatchDetail = `Assigned to "${r.item_name}" (water heaters) but describes unrelated central heating or sink leak repair.`;
+      } else if (arch === 'heating_system' && /\b(annual safety check|annual central heating maintenance|entretien complet pour notre chaudière|onderhoud van onze bulex gaswandketel)\b/i.test(bodyLower) && !/\b(radiator\w*|thermostat\w*)\b/i.test(bodyLower)) {
+        mismatchDetail = `Assigned to "${r.item_name}" but specifically describes routine boiler maintenance.`;
+      } else if (arch === 'boiler_install' && /\b(water heater|chauffe-eau|warmwaterboiler)\b/i.test(bodyLower) && !/\b(boiler|chaudière|ketel)\b/i.test(bodyLower)) {
+        mismatchDetail = `Assigned to "${r.item_name}" (boiler/gas equipment) but describes water heater selection.`;
       } else if (arch === 'boiler_repair' && /\b(replacing an outdated gas boiler|remplacement de notre ancienne chaudière|contrat d'entretien)\b/i.test(bodyLower) && !mentionsAcuteBreakdown) {
         mismatchDetail = `Assigned to "${r.item_name}" (boiler repair) but describes full boiler replacement or maintenance contract.`;
       }
