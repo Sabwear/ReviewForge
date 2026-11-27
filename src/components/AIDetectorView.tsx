@@ -680,25 +680,37 @@ export function AIDetectorView({
                   Checks repeated sentences, repeat reviewer dates, marketing expressions, and service fit — approve only genuine reviews before publishing.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  const cleanIds = reviews
-                    .filter((r) => {
-                      const hasLocalIssue = Boolean(integrity.issuesByReviewId[r.id]?.length);
-                      const audit = reviewAuditMap[r.id];
-                      return !hasLocalIssue && (!audit || audit.verdict === 'human');
-                    })
-                    .map((r) => r.id);
-                  onApproveCleanReviews(cleanIds);
-                }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Verify All Clean Rows</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                {integrity.flaggedReviewIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onDeleteFlaggedReviews(integrity.flaggedReviewIds)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Exclude Unsupported ({integrity.flaggedReviewIds.length})</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cleanIds = reviews
+                      .filter((r) => {
+                        const hasLocalIssue = Boolean(integrity.issuesByReviewId[r.id]?.length);
+                        const audit = reviewAuditMap[r.id];
+                        return !hasLocalIssue && (!audit || audit.verdict === 'human');
+                      })
+                      .map((r) => r.id);
+                    onApproveCleanReviews(cleanIds);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Verify Clean Only</span>
+                </button>
+              </div>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 text-xs">
               {[
                 {
                   label: 'Unique Emails',
@@ -706,27 +718,46 @@ export function AIDetectorView({
                   ok: integrity.duplicateEmailCount === 0,
                 },
                 {
-                  label: 'Repeated Sentences',
+                  label: 'Inserted Headings',
+                  val: integrity.insertedHeadingCount,
+                  ok: integrity.insertedHeadingCount === 0,
+                },
+                {
+                  label: 'Repeated Templates',
                   val: integrity.repeatedSentenceCount,
                   ok: integrity.repeatedSentenceCount === 0,
                 },
                 {
-                  label: 'Repeat Date Issues',
-                  val: integrity.repeatDateIssues + integrity.futureDateCount,
-                  ok: integrity.repeatDateIssues + integrity.futureDateCount === 0,
+                  label: 'Broken Grammar',
+                  val: integrity.brokenGrammarCount,
+                  ok: integrity.brokenGrammarCount === 0,
                 },
                 {
-                  label: 'Marketing Phrases',
+                  label: 'Mixed-Lang Service',
+                  val: integrity.mixedLanguageServiceCount,
+                  ok: integrity.mixedLanguageServiceCount === 0,
+                },
+                {
+                  label: 'Promotional Copy',
                   val: integrity.marketingPhraseCount,
                   ok: integrity.marketingPhraseCount === 0,
                 },
                 {
-                  label: 'Off-Domain Wording',
-                  val: integrity.offDomainCount,
-                  ok: integrity.offDomainCount === 0,
+                  label: 'Wrong Service / Date',
+                  val:
+                    integrity.incorrectServiceCount +
+                    integrity.offDomainCount +
+                    integrity.repeatDateIssues +
+                    integrity.futureDateCount,
+                  ok:
+                    integrity.incorrectServiceCount +
+                      integrity.offDomainCount +
+                      integrity.repeatDateIssues +
+                      integrity.futureDateCount ===
+                    0,
                 },
                 {
-                  label: 'Verified to Publish',
+                  label: 'Verified Genuine',
                   val: `${verifiedIds.length}/${reviews.length}`,
                   ok: verifiedIds.length > 0,
                 },

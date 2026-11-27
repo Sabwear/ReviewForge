@@ -699,21 +699,22 @@ Business context: ${businessContext || '(Infer from offerings — pay close atte
 Reviews to audit:
 ${formatted}
 
-SCORING RULES (strict):
+SCORING RULES (strict — prioritize genuine customer feedback over quantity/SEO):
 - Give LOW humanScore (10–49, verdict="ai_flagged") if a review:
-  * Uses e-commerce/shipping/packaging/gift/item-swap phrasing ("bought", "shipping", "box", "packaging", "colis", "emballage", "cet article", "dit artikel", "cadeau") for a SERVICE business!
-  * Sounds robotic, overly polished, or uses AI clichés ("game-changer", "exceeded expectations", "thoughtful and sturdy").
-  * Reviews a city name or navigation label as if it were a product.
-- Give MEDIUM humanScore (50–74, verdict="generic") if it is grammatically fine but too vague/template-like and could apply to any business.
-- Give HIGH humanScore (75–98, verdict="human") if it sounds like a real human client/buyer with natural cadence and concrete, domain-accurate details.
+  * Uses an automatically inserted website heading, slogan, navigation label, or city name as the service/product.
+  * Uses e-commerce/shipping/packaging/gift wording ("bought", "shipping", "box", "packaging", "colis", "emballage", "cet article", "dit artikel", "cadeau") for a SERVICE business, OR describes a different service than assigned.
+  * Contains repeated sentence templates, broken grammar, mixed-language untranslated service names inside a non-English review, or promotional/marketing expressions ("game-changer", "exceeded expectations", "worth every penny", "stress-free").
+  * Sounds fabricated or unsupported rather than grounded in a genuine customer experience.
+- Give MEDIUM humanScore (50–74, verdict="generic") if it is grammatically fine but too vague/template-like to verify as genuine customer feedback.
+- Give HIGH humanScore (75–98, verdict="human") ONLY if it reads like genuine, plain-spoken customer feedback with accurate service assignment and original tone.
 
 For EVERY review ID, return:
 - humanScore (0-100) and verdict ("human" | "generic" | "ai_flagged")
 - dimensions: naturalTone (0-100), domainFit (0-100), specificity (0-100)
-- reason: clear 1-sentence explanation of WHY it scored this way
-- signals: 2-3 short tags (e.g. "Off-domain e-commerce wording", "AI cliché", "Too generic", "Natural cadence", "Concrete service detail")
-- flaggedPhrases: exact words/phrases quoted from the review that look AI/generic/off-domain (empty array [] if human)
-- suggestion: concrete 1-sentence tip to improve it (or "Looks authentic — ready to export." if human)`;
+- reason: clear 1-sentence explanation of WHY it passed or should be excluded
+- signals: 2-3 short tags (e.g. "Inserted heading", "Repeated template", "Broken grammar", "Mixed-language service", "Promotional wording", "Wrong service assignment", "Genuine customer tone")
+- flaggedPhrases: exact quoted words/phrases that look promotional, broken, mixed-language, or off-domain (empty array [] if genuine)
+- suggestion: recommend excluding if unsupported/fabricated, or a concrete preservation note if genuine`;
 
   const { data, usage } = await generateJsonWithAI<{ results?: Partial<ReviewAuditResult>[] }>(payload, env, {
     systemInstruction:
