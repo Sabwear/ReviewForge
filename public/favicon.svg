@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="rf-bg" x1="6" y1="4" x2="58" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="52%" stop-color="#2563EB" />
+      <stop offset="100%" stop-color="#4F46E5" />
+    </linearGradient>
+    <linearGradient id="rf-shine" x1="12" y1="6" x2="48" y2="54" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.34" />
+      <stop offset="45%" stop-color="#FFFFFF" stop-opacity="0.06" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="rf-star" x1="22" y1="16" x2="42" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FEF08A" />
+      <stop offset="55%" stop-color="#FBBF24" />
+      <stop offset="100%" stop-color="#F59E0B" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="16" fill="url(#rf-bg)" />
+  <rect x="4.75" y="4.75" width="54.5" height="54.5" rx="15.25" stroke="url(#rf-shine)" stroke-width="1.5" />
+  <!-- Stylized review bubble / forge crest -->
+  <path
+    d="M19 20.5C19 17.4624 21.4624 15 24.5 15H39.5C42.5376 15 45 17.4624 45 20.5V34.5C45 37.5376 42.5376 40 39.5 40H31.8L23.5 47.2C22.45 48.1 20.8 47.36 20.8 45.98V40H24.5H24C21.2386 40 19 37.7614 19 35V20.5Z"
+    fill="#FFFFFF"
+    fill-opacity="0.16"
+    stroke="#FFFFFF"
+    stroke-opacity="0.45"
+    stroke-width="1.5"
+  />
+  <!-- Forged 4-point review star -->
+  <path
+    d="M32 18.5L35.1 24.9L42 27.5L35.1 30.1L32 36.5L28.9 30.1L22 27.5L28.9 24.9L32 18.5Z"
+    fill="url(#rf-star)"
+  />
+  <!-- Subtle accent spark -->
+  <circle cx="43.5" cy="18.5" r="2.2" fill="#FFFFFF" fill-opacity="0.9" />
+</svg>
