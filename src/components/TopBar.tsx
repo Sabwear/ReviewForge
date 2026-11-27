@@ -1,4 +1,5 @@
-import { Cpu, Download, Lock } from 'lucide-react';
+import { Download } from 'lucide-react';
+import { AIConnectionStatus } from '../hooks/useAISettings';
 import { Theme } from '../hooks/useTheme';
 import { ActiveTab, EXPORT_FORMAT_OPTIONS, ExportFormat } from '../types/reviews';
 import { BrandLogo } from './BrandLogo';
@@ -13,8 +14,7 @@ interface TopBarProps {
   theme: Theme;
   onThemeChange: (theme: Theme) => void;
   aiStatusLabel: string;
-  isAIConfigured: boolean;
-  isFallbackMode: boolean;
+  aiConnectionStatus: AIConnectionStatus;
   onOpenAISettings: () => void;
 }
 
@@ -27,8 +27,7 @@ export function TopBar({
   theme,
   onThemeChange,
   aiStatusLabel,
-  isAIConfigured,
-  isFallbackMode,
+  aiConnectionStatus,
   onOpenAISettings,
 }: TopBarProps) {
   const navItems: { id: ActiveTab; label: string }[] = [
@@ -80,30 +79,44 @@ export function TopBar({
           })}
         </nav>
 
-        {/* Zone 3: AI Settings pill + Theme switcher + Export CTA */}
+        {/* Zone 3: AI Online/Offline pill + Theme switcher + Export CTA */}
         <div className="flex items-center gap-2.5 shrink-0">
           <button
             type="button"
             onClick={onOpenAISettings}
             title="Configure AI provider, API key, models, and fallback secret code"
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${
-              isAIConfigured
-                ? 'bg-emerald-50/90 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30 hover:bg-emerald-100/80 dark:hover:bg-emerald-500/25'
-                : 'bg-slate-100 dark:bg-slate-800/90 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-sky-400 dark:hover:border-sky-500'
+            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${
+              aiConnectionStatus === 'online'
+                ? 'bg-emerald-50/90 dark:bg-[#62C49C]/12 text-emerald-700 dark:text-[#62C49C] border-emerald-200 dark:border-[#62C49C]/30 hover:bg-emerald-100/80 dark:hover:bg-[#62C49C]/20'
+                : aiConnectionStatus === 'checking'
+                ? 'bg-amber-50/90 dark:bg-[#E0B36A]/12 text-amber-700 dark:text-[#E0B36A] border-amber-200 dark:border-[#E0B36A]/30'
+                : 'bg-slate-100 dark:bg-[#1C2029] text-slate-600 dark:text-[#E4E6EB]/70 border-slate-200 dark:border-white/[0.10] hover:border-sky-400 dark:hover:border-[#68AEE0]/50'
             }`}
           >
-            {isFallbackMode && !isAIConfigured ? (
-              <Lock className="w-3.5 h-3.5 text-amber-500 shrink-0" aria-hidden="true" />
-            ) : (
-              <Cpu
-                className={`w-3.5 h-3.5 shrink-0 ${
-                  isAIConfigured ? 'text-emerald-600 dark:text-emerald-400' : 'text-sky-600 dark:text-sky-400'
+            <span className="relative flex h-2 w-2 shrink-0" aria-hidden="true">
+              {aiConnectionStatus === 'online' && (
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              )}
+              <span
+                className={`relative inline-flex rounded-full h-2 w-2 ${
+                  aiConnectionStatus === 'online'
+                    ? 'bg-emerald-500'
+                    : aiConnectionStatus === 'checking'
+                    ? 'bg-amber-400 animate-pulse'
+                    : 'bg-rose-400 dark:bg-[#E58388]'
                 }`}
-                aria-hidden="true"
               />
-            )}
-            <span className="max-w-[130px] truncate hidden md:inline">{aiStatusLabel}</span>
-            <span className="md:hidden">AI</span>
+            </span>
+            <span className="font-bold">
+              {aiConnectionStatus === 'online'
+                ? 'Online'
+                : aiConnectionStatus === 'checking'
+                ? 'Checking…'
+                : 'Offline'}
+            </span>
+            <span className="text-[11px] opacity-80 max-w-[120px] truncate hidden md:inline">
+              · {aiStatusLabel}
+            </span>
           </button>
 
           <ThemeSwitcher theme={theme} onChange={onThemeChange} />

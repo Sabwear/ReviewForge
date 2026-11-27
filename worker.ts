@@ -89,7 +89,15 @@ async function handleVerifySecret(req: Request, env: Env): Promise<Response> {
   }
   const fb = getFallbackInfo(env);
   if (!fb.configured) {
-    return json({ valid: false, configured: false, error: 'No server fallback AI key is configured.' }, 404);
+    return json(
+      {
+        valid: false,
+        configured: false,
+        error:
+          'No server API key found. Note: Cloudflare Workers does not read local .env files — add GEMINI_API_KEY (or FALLBACK_AI_API_KEY) and FALLBACK_SECRET_CODE in Cloudflare Dashboard → Workers → Settings → Variables and Secrets.',
+      },
+      404
+    );
   }
   if (!fb.requiresSecret) {
     return json({ valid: true, configured: true, provider: fb.provider, defaultModel: fb.defaultModel });
@@ -355,6 +363,14 @@ Rules: Extract 6–18 real services/products (or use the Shopify list above), cl
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const { pathname } = new URL(req.url);
+    if (pathname === '/api/ai/status') {
+      const fb = getFallbackInfo(env);
+      return json({
+        fallbackConfigured: fb.configured,
+        fallbackRequiresSecret: fb.requiresSecret,
+        fallbackProvider: fb.configured ? fb.provider : null,
+      });
+    }
     if (pathname === '/api/ai/models') {
       return req.method === 'POST' ? handleModels(req, env) : json({ error: 'Method not allowed. Use POST.' }, 405);
     }

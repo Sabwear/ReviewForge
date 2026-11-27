@@ -53,6 +53,8 @@ export default function App() {
     selectProvider: selectAIProvider,
     getRequestPayload: getAIRequestPayload,
     isAIConfigured,
+    connectionStatus,
+    serverFallback,
     detectedModels,
     isLoadingModels,
     modelsError,
@@ -588,8 +590,7 @@ export default function App() {
         theme={theme}
         onThemeChange={setTheme}
         aiStatusLabel={aiStatusLabel}
-        isAIConfigured={isAIConfigured}
-        isFallbackMode={aiSettings.provider === 'fallback'}
+        aiConnectionStatus={connectionStatus}
         onOpenAISettings={() => setIsAIModalOpen(true)}
       />
 
@@ -669,7 +670,7 @@ export default function App() {
               onLoadSampleBusiness={handleLoadSampleBusiness}
               aiUsageHistory={usageHistory}
               activeAIProviderLabel={aiStatusLabel}
-              isAIConfigured={isAIConfigured}
+              aiConnectionStatus={connectionStatus}
               onOpenAISettings={() => setIsAIModalOpen(true)}
               onClearAIUsage={clearUsageHistory}
             />
@@ -711,6 +712,8 @@ export default function App() {
         usageHistory={usageHistory}
         onClearUsage={clearUsageHistory}
         onOpenDashboard={() => setActiveTab('dashboard')}
+        connectionStatus={connectionStatus}
+        serverFallback={serverFallback}
       />
     </div>
   );

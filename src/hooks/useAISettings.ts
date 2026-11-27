@@ -9,6 +9,15 @@ import {
 } from '../types/ai';
 import { rankModelsForApp } from '../utils/modelAdvisor';
 
+export type AIConnectionStatus = 'online' | 'offline' | 'checking';
+
+export interface ServerFallbackStatus {
+  checked: boolean;
+  fallbackConfigured: boolean;
+  fallbackRequiresSecret: boolean;
+  fallbackProvider: string | null;
+}
+
 const SETTINGS_KEY = 'reviewforge-ai-settings-v1';
 const USAGE_KEY = 'reviewforge-ai-usage-v1';
 const MAX_USAGE_RECORDS = 500;
@@ -51,6 +60,13 @@ export function useAISettings() {
   const [detectedModels, setDetectedModels] = useState<DetectedModel[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<AIConnectionStatus>('offline');
+  const [serverFallback, setServerFallback] = useState<ServerFallbackStatus>({
+    checked: false,
+    fallbackConfigured: false,
+    fallbackRequiresSecret: false,
+    fallbackProvider: null,
+  });
 
   useEffect(() => {
     try {
@@ -68,14 +84,42 @@ export function useAISettings() {
     }
   }, [usageHistory]);
 
+  // Fetch server fallback status on mount (never exposes secrets)
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/ai/status')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        setServerFallback({
+          checked: true,
+          fallbackConfigured: Boolean(data.fallbackConfigured),
+          fallbackRequiresSecret: Boolean(data.fallbackRequiresSecret),
+          fallbackProvider: data.fallbackProvider || null,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setServerFallback((prev) => ({ ...prev, checked: true }));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const updateSettings = useCallback((patch: Partial<AISettings>) => {
     setSettingsState((prev) => ({ ...prev, ...patch }));
+    if (patch.apiKey !== undefined || patch.baseUrl !== undefined || patch.secretCode !== undefined) {
+      setConnectionStatus('offline');
+    }
   }, []);
 
   const selectProvider = useCallback((provider: AIProviderId) => {
     const meta = AI_PROVIDERS.find((p) => p.id === provider);
     setDetectedModels([]);
     setModelsError(null);
+    setConnectionStatus('offline');
     setSettingsState((prev) => ({
       ...prev,
       provider,
@@ -95,7 +139,7 @@ export function useAISettings() {
   }, [settings]);
 
   const isAIConfigured = Boolean(
-    (settings.provider === 'fallback' && settings.fallbackUnlocked && settings.secretCode.trim()) ||
+    (settings.provider === 'fallback' && settings.fallbackUnlocked && (settings.secretCode.trim() || !serverFallback.fallbackRequiresSecret)) ||
       (settings.provider === 'ollama' && settings.baseUrl.trim()) ||
       (settings.provider !== 'fallback' && settings.provider !== 'ollama' && settings.apiKey.trim())
   );
@@ -105,9 +149,9 @@ export function useAISettings() {
       const cfg = { ...settings, ...override };
       setIsLoadingModels(true);
       setModelsError(null);
+      setConnectionStatus('checking');
 
       try {
-        // Direct browser probe for localhost Ollama when running on a remote host (e.g. Cloudflare Workers)
         if (cfg.provider === 'ollama' && /^https?:\/\/(localhost|127\.0\.0\.1)/i.test(cfg.baseUrl.trim())) {
           try {
             const direct = await fetch(`${cfg.baseUrl.trim().replace(/\/+$/, '')}/api/tags`);
@@ -121,13 +165,14 @@ export function useAISettings() {
                 });
               const ranked = rankModelsForApp(models);
               setDetectedModels(ranked);
+              setConnectionStatus(ranked.length > 0 ? 'online' : 'offline');
               if (ranked.length > 0 && !ranked.some((m) => m.id === cfg.model)) {
                 setSettingsState((prev) => ({ ...prev, model: ranked[0].id }));
               }
               return ranked;
             }
           } catch {
-            // Fall through to backend proxy (works in local dev)
+            // Fall through to backend proxy
           }
         }
 
@@ -153,6 +198,7 @@ export function useAISettings() {
         }
         const ranked = rankModelsForApp(payload.models);
         setDetectedModels(ranked);
+        setConnectionStatus(ranked.length > 0 ? 'online' : 'offline');
         if (ranked.length > 0 && !ranked.some((m) => m.id === cfg.model)) {
           setSettingsState((prev) => ({ ...prev, model: ranked[0].id }));
         }
@@ -161,6 +207,7 @@ export function useAISettings() {
         const message = err instanceof Error ? err.message : 'Failed to detect models.';
         setModelsError(message);
         setDetectedModels([]);
+        setConnectionStatus('offline');
         return [];
       } finally {
         setIsLoadingModels(false);
@@ -169,8 +216,52 @@ export function useAISettings() {
     [settings]
   );
 
+  // Silent connectivity check on initial page load if credentials are already saved
+  useEffect(() => {
+    const hasSavedCreds =
+      (settings.provider === 'fallback' && settings.fallbackUnlocked) ||
+      (settings.provider !== 'fallback' && settings.provider !== 'ollama' && Boolean(settings.apiKey.trim()));
+    if (!hasSavedCreds) {
+      setConnectionStatus('offline');
+      return;
+    }
+    let cancelled = false;
+    setConnectionStatus('checking');
+    fetch('/api/ai/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        aiConfig: {
+          provider: settings.provider,
+          apiKey: settings.provider === 'fallback' ? '' : settings.apiKey.trim(),
+          model: settings.model.trim(),
+          baseUrl: settings.baseUrl.trim(),
+          secretCode: settings.secretCode.trim(),
+        },
+      }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        if (data && Array.isArray(data.models) && data.models.length > 0) {
+          setDetectedModels(rankModelsForApp(data.models));
+          setConnectionStatus('online');
+        } else {
+          setConnectionStatus('offline');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setConnectionStatus('offline');
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const verifySecretCode = useCallback(async (code: string) => {
     const trimmed = code.trim();
+    setConnectionStatus('checking');
     const res = await fetch('/api/ai/verify-secret', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -184,6 +275,7 @@ export function useAISettings() {
     };
     if (!res.ok || !payload.valid) {
       setSettingsState((prev) => ({ ...prev, fallbackUnlocked: false }));
+      setConnectionStatus('offline');
       throw new Error(payload.error || 'Invalid secret access code.');
     }
     setSettingsState((prev) => ({
@@ -194,6 +286,7 @@ export function useAISettings() {
       fallbackProvider: payload.provider,
       model: payload.defaultModel || prev.model,
     }));
+    setConnectionStatus('online');
     return payload;
   }, []);
 
@@ -204,6 +297,9 @@ export function useAISettings() {
       status: 'success' | 'error' = 'success',
       errorMessage?: string
     ) => {
+      if (status === 'success') {
+        setConnectionStatus('online');
+      }
       const fallbackProvider =
         settings.provider === 'fallback'
           ? ((settings.fallbackProvider as Exclude<AIProviderId, 'fallback'>) || 'gemini')
@@ -238,6 +334,8 @@ export function useAISettings() {
     selectProvider,
     getRequestPayload,
     isAIConfigured,
+    connectionStatus,
+    serverFallback,
     detectedModels,
     isLoadingModels,
     modelsError,

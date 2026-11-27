@@ -22,6 +22,7 @@ import {
   RotateCcw,
   Star,
 } from 'lucide-react';
+import { AIConnectionStatus } from '../hooks/useAISettings';
 import { AIUsageRecord } from '../types/ai';
 import { AIUsageSection } from './AIUsageSection';
 import { SAMPLE_BUSINESSES } from '../data/sampleCatalog';
@@ -46,7 +47,7 @@ interface DashboardViewProps {
   onLoadSampleBusiness: (id: SampleBusinessId) => void;
   aiUsageHistory: AIUsageRecord[];
   activeAIProviderLabel: string;
-  isAIConfigured: boolean;
+  aiConnectionStatus: AIConnectionStatus;
   onOpenAISettings: () => void;
   onClearAIUsage: () => void;
 }
@@ -250,7 +251,7 @@ export function DashboardView({
   onLoadSampleBusiness,
   aiUsageHistory,
   activeAIProviderLabel,
-  isAIConfigured,
+  aiConnectionStatus,
   onOpenAISettings,
   onClearAIUsage,
 }: DashboardViewProps) {
@@ -585,7 +586,7 @@ export function DashboardView({
         <AIUsageSection
           usageHistory={aiUsageHistory}
           activeProviderLabel={activeAIProviderLabel}
-          isAIConfigured={isAIConfigured}
+          aiConnectionStatus={aiConnectionStatus}
           onOpenAISettings={onOpenAISettings}
           onClearUsage={onClearAIUsage}
         />
@@ -1268,7 +1269,7 @@ export function DashboardView({
       <AIUsageSection
         usageHistory={aiUsageHistory}
         activeProviderLabel={activeAIProviderLabel}
-        isAIConfigured={isAIConfigured}
+        aiConnectionStatus={aiConnectionStatus}
         onOpenAISettings={onOpenAISettings}
         onClearUsage={onClearAIUsage}
       />

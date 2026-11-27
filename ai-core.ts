@@ -22,6 +22,10 @@ export interface AIConfigPayload {
 export interface ServerAIEnv {
   GEMINI_API_KEY?: string;
   GEMINI_MODEL?: string;
+  OPENROUTER_API_KEY?: string;
+  OPENAI_API_KEY?: string;
+  GROQ_API_KEY?: string;
+  SECRET_CODE?: string;
   FALLBACK_SECRET_CODE?: string;
   FALLBACK_AI_PROVIDER?: string;
   FALLBACK_AI_API_KEY?: string;
@@ -87,15 +91,64 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+function cleanEnv(v: string | undefined): string {
+  const s = (v || '').trim();
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    return s.slice(1, -1).trim();
+  }
+  return s;
+}
+
+function guessProviderFromKey(key: string): Exclude<AIProviderId, 'fallback'> {
+  if (key.startsWith('sk-or-')) return 'openrouter';
+  if (key.startsWith('gsk_')) return 'groq';
+  if (key.startsWith('sk-')) return 'openai';
+  return 'gemini';
+}
+
+function resolveEnvFallbackCredentials(env: ServerAIEnv): {
+  apiKey: string;
+  provider: Exclude<AIProviderId, 'fallback'>;
+} | null {
+  const validProviders: Exclude<AIProviderId, 'fallback'>[] = [
+    'gemini',
+    'openrouter',
+    'openai',
+    'groq',
+    'ollama',
+    'custom',
+  ];
+  const explicitProv = cleanEnv(env.FALLBACK_AI_PROVIDER).toLowerCase();
+  const hasExplicitProv = validProviders.includes(explicitProv as Exclude<AIProviderId, 'fallback'>);
+
+  const fallbackKey = cleanEnv(env.FALLBACK_AI_API_KEY);
+  if (fallbackKey) {
+    return {
+      apiKey: fallbackKey,
+      provider: hasExplicitProv
+        ? (explicitProv as Exclude<AIProviderId, 'fallback'>)
+        : guessProviderFromKey(fallbackKey),
+    };
+  }
+  const geminiKey = cleanEnv(env.GEMINI_API_KEY);
+  if (geminiKey) return { apiKey: geminiKey, provider: 'gemini' };
+  const openrouterKey = cleanEnv(env.OPENROUTER_API_KEY);
+  if (openrouterKey) return { apiKey: openrouterKey, provider: 'openrouter' };
+  const openaiKey = cleanEnv(env.OPENAI_API_KEY);
+  if (openaiKey) return { apiKey: openaiKey, provider: 'openai' };
+  const groqKey = cleanEnv(env.GROQ_API_KEY);
+  if (groqKey) return { apiKey: groqKey, provider: 'groq' };
+  return null;
+}
+
 export function isFallbackConfigured(env: ServerAIEnv): boolean {
-  const key = (env.FALLBACK_AI_API_KEY || env.GEMINI_API_KEY || '').trim();
-  return Boolean(key);
+  return Boolean(resolveEnvFallbackCredentials(env));
 }
 
 export function isFallbackSecretValid(secretCode: string | undefined, env: ServerAIEnv): boolean {
-  const expected = (env.FALLBACK_SECRET_CODE || '').trim();
+  const expected = cleanEnv(env.FALLBACK_SECRET_CODE) || cleanEnv(env.SECRET_CODE);
   if (!expected) return false;
-  const provided = (secretCode || '').trim();
+  const provided = cleanEnv(secretCode);
   return timingSafeEqual(provided, expected);
 }
 
@@ -105,23 +158,13 @@ export function getFallbackInfo(env: ServerAIEnv): {
   provider: Exclude<AIProviderId, 'fallback'>;
   defaultModel: string;
 } {
-  const rawProv = (env.FALLBACK_AI_PROVIDER || 'gemini').toLowerCase().trim();
-  const validProviders: Exclude<AIProviderId, 'fallback'>[] = [
-    'gemini',
-    'openrouter',
-    'openai',
-    'groq',
-    'ollama',
-    'custom',
-  ];
-  const provider = validProviders.includes(rawProv as Exclude<AIProviderId, 'fallback'>)
-    ? (rawProv as Exclude<AIProviderId, 'fallback'>)
-    : 'gemini';
+  const creds = resolveEnvFallbackCredentials(env);
+  const provider = creds?.provider || 'gemini';
   const defaultModel =
-    (env.FALLBACK_AI_MODEL || env.GEMINI_MODEL || DEFAULT_MODELS[provider]).trim();
+    cleanEnv(env.FALLBACK_AI_MODEL) || cleanEnv(env.GEMINI_MODEL) || DEFAULT_MODELS[provider];
   return {
-    configured: isFallbackConfigured(env),
-    requiresSecret: Boolean((env.FALLBACK_SECRET_CODE || '').trim()),
+    configured: Boolean(creds),
+    requiresSecret: Boolean(cleanEnv(env.FALLBACK_SECRET_CODE) || cleanEnv(env.SECRET_CODE)),
     provider,
     defaultModel,
   };
@@ -151,20 +194,19 @@ export function resolveAIConfig(
   }
 
   // 2. Secret-code-protected server fallback AI
+  const creds = resolveEnvFallbackCredentials(env);
   const fb = getFallbackInfo(env);
-  if (fb.configured) {
-    // If FALLBACK_SECRET_CODE is set, require a matching secretCode!
-    // If FALLBACK_SECRET_CODE is NOT set (e.g., private local dev), allow fallback only if explicitly requested or no provider set.
+  if (creds && fb.configured) {
     const allowed = fb.requiresSecret
       ? isFallbackSecretValid(payload?.secretCode, env)
       : true;
 
     if (allowed) {
       return {
-        provider: fb.provider,
-        apiKey: (env.FALLBACK_AI_API_KEY || env.GEMINI_API_KEY || '').trim(),
+        provider: creds.provider,
+        apiKey: creds.apiKey,
         model: userModel || fb.defaultModel,
-        baseUrl: (env.FALLBACK_AI_BASE_URL || DEFAULT_BASE_URLS[fb.provider]).trim().replace(/\/+$/, ''),
+        baseUrl: (cleanEnv(env.FALLBACK_AI_BASE_URL) || DEFAULT_BASE_URLS[creds.provider]).replace(/\/+$/, ''),
         usedFallback: true,
       };
     }

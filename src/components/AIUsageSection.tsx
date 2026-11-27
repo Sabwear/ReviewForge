@@ -21,12 +21,13 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { AIConnectionStatus } from '../hooks/useAISettings';
 import { AIUsageRecord } from '../types/ai';
 
 interface AIUsageSectionProps {
   usageHistory: AIUsageRecord[];
   activeProviderLabel: string;
-  isAIConfigured: boolean;
+  aiConnectionStatus: AIConnectionStatus;
   onOpenAISettings: () => void;
   onClearUsage: () => void;
 }
@@ -43,7 +44,7 @@ const PROVIDER_COLORS: Record<string, string> = {
 export function AIUsageSection({
   usageHistory,
   activeProviderLabel,
-  isAIConfigured,
+  aiConnectionStatus,
   onOpenAISettings,
   onClearUsage,
 }: AIUsageSectionProps) {
@@ -121,18 +122,31 @@ export function AIUsageSection({
             <h2 className="font-display text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
               AI Usage & Telemetry
               <span
-                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                  isAIConfigured
-                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30'
-                    : 'bg-slate-100 text-slate-600 border border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
+                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
+                  aiConnectionStatus === 'online'
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-[#62C49C]/15 dark:text-[#62C49C] dark:border-[#62C49C]/30'
+                    : aiConnectionStatus === 'checking'
+                    ? 'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-[#E0B36A]/15 dark:text-[#E0B36A] dark:border-[#E0B36A]/30'
+                    : 'bg-slate-100 text-slate-600 border border-slate-200 dark:bg-white/[0.06] dark:text-[#E4E6EB]/70 dark:border-white/[0.10]'
                 }`}
               >
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${
-                    isAIConfigured ? 'bg-emerald-500' : 'bg-slate-400'
+                    aiConnectionStatus === 'online'
+                      ? 'bg-emerald-500'
+                      : aiConnectionStatus === 'checking'
+                      ? 'bg-amber-400 animate-pulse'
+                      : 'bg-rose-400'
                   }`}
                 />
-                {activeProviderLabel}
+                <span>
+                  {aiConnectionStatus === 'online'
+                    ? 'Online'
+                    : aiConnectionStatus === 'checking'
+                    ? 'Checking…'
+                    : 'Offline'}
+                </span>
+                <span className="opacity-75">· {activeProviderLabel}</span>
               </span>
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">

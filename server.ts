@@ -678,6 +678,10 @@ function getServerAIEnv(): ServerAIEnv {
   return {
     GEMINI_API_KEY: process.env.GEMINI_API_KEY,
     GEMINI_MODEL: process.env.GEMINI_MODEL,
+    OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    GROQ_API_KEY: process.env.GROQ_API_KEY,
+    SECRET_CODE: process.env.SECRET_CODE,
     FALLBACK_SECRET_CODE: process.env.FALLBACK_SECRET_CODE,
     FALLBACK_AI_PROVIDER: process.env.FALLBACK_AI_PROVIDER,
     FALLBACK_AI_API_KEY: process.env.FALLBACK_AI_API_KEY,
@@ -685,6 +689,15 @@ function getServerAIEnv(): ServerAIEnv {
     FALLBACK_AI_BASE_URL: process.env.FALLBACK_AI_BASE_URL,
   };
 }
+
+app.get('/api/ai/status', (_req, res) => {
+  const fb = getFallbackInfo(getServerAIEnv());
+  res.json({
+    fallbackConfigured: fb.configured,
+    fallbackRequiresSecret: fb.requiresSecret,
+    fallbackProvider: fb.configured ? fb.provider : null,
+  });
+});
 
 app.post('/api/ai/models', async (req, res) => {
   try {
@@ -701,7 +714,12 @@ app.post('/api/ai/verify-secret', (req, res) => {
   const env = getServerAIEnv();
   const fb = getFallbackInfo(env);
   if (!fb.configured) {
-    res.status(404).json({ valid: false, configured: false, error: 'No server fallback AI key is configured.' });
+    res.status(404).json({
+      valid: false,
+      configured: false,
+      error:
+        'No server API key found in .env. Add GEMINI_API_KEY (or FALLBACK_AI_API_KEY / OPENROUTER_API_KEY / OPENAI_API_KEY / GROQ_API_KEY) to your .env file and restart the server.',
+    });
     return;
   }
   if (!fb.requiresSecret) {

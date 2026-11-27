@@ -17,6 +17,7 @@ import {
   Unlock,
   X,
 } from 'lucide-react';
+import { AIConnectionStatus, ServerFallbackStatus } from '../hooks/useAISettings';
 import {
   AI_PROVIDERS,
   AIProviderId,
@@ -44,6 +45,8 @@ interface AISettingsModalProps {
   usageHistory: AIUsageRecord[];
   onClearUsage: () => void;
   onOpenDashboard: () => void;
+  connectionStatus: AIConnectionStatus;
+  serverFallback: ServerFallbackStatus;
 }
 
 export function AISettingsModal({
@@ -60,6 +63,8 @@ export function AISettingsModal({
   usageHistory,
   onClearUsage,
   onOpenDashboard,
+  connectionStatus,
+  serverFallback,
 }: AISettingsModalProps) {
   const [activeTab, setActiveTab] = useState<'config' | 'usage'>('config');
   const [showKey, setShowKey] = useState(false);
@@ -161,8 +166,32 @@ export function AISettingsModal({
               <Sparkles className="w-4.5 h-4.5" />
             </div>
             <div>
-              <h2 className="font-display text-base font-bold text-slate-900 dark:text-white">
-                AI Studio & Provider Settings
+              <h2 className="font-display text-base font-bold text-slate-900 dark:text-[#E4E6EB] flex items-center gap-2">
+                <span>AI Studio & Provider Settings</span>
+                <span
+                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                    connectionStatus === 'online'
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-[#62C49C]/12 dark:text-[#62C49C] dark:border-[#62C49C]/30'
+                      : connectionStatus === 'checking'
+                      ? 'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-[#E0B36A]/12 dark:text-[#E0B36A] dark:border-[#E0B36A]/30'
+                      : 'bg-slate-100 text-slate-600 border border-slate-200 dark:bg-white/[0.06] dark:text-[#E4E6EB]/70 dark:border-white/[0.10]'
+                  }`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      connectionStatus === 'online'
+                        ? 'bg-emerald-500'
+                        : connectionStatus === 'checking'
+                        ? 'bg-amber-400 animate-pulse'
+                        : 'bg-rose-400'
+                    }`}
+                  />
+                  {connectionStatus === 'online'
+                    ? 'Online'
+                    : connectionStatus === 'checking'
+                    ? 'Checking…'
+                    : 'Offline'}
+                </span>
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 Bring your own API key (Gemini, OpenRouter, OpenAI, Groq, Ollama) or unlock hidden fallback AI.
@@ -272,11 +301,26 @@ export function AISettingsModal({
                   <div className="flex items-start gap-2.5">
                     <ShieldCheck className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                     <div>
-                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
-                        Private Fallback AI Access
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                        <span>Private Fallback AI Access</span>
+                        {serverFallback.checked && (
+                          <span
+                            className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${
+                              serverFallback.fallbackConfigured
+                                ? 'bg-emerald-100 text-emerald-700 dark:bg-[#62C49C]/15 dark:text-[#62C49C]'
+                                : 'bg-rose-100 text-rose-700 dark:bg-[#E58388]/15 dark:text-[#E58388]'
+                            }`}
+                          >
+                            {serverFallback.fallbackConfigured
+                              ? `Server key ready (${serverFallback.fallbackProvider})`
+                              : 'No server key detected'}
+                          </span>
+                        )}
                       </h3>
                       <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
-                        Enter your secret access code to unlock the server-hosted backup AI key without exposing it publicly.
+                        {serverFallback.checked && !serverFallback.fallbackConfigured
+                          ? 'No API key found on the server. On Cloudflare Workers, local .env files are not uploaded — add GEMINI_API_KEY (or FALLBACK_AI_API_KEY) and FALLBACK_SECRET_CODE in Cloudflare Dashboard → Worker → Settings → Variables and Secrets.'
+                          : 'Enter your secret access code to unlock the server-hosted backup AI key without exposing it publicly.'}
                       </p>
                     </div>
                   </div>
