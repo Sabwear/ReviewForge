@@ -101,21 +101,25 @@ html.dark {
    Dark Mode Utility Mappings (Consistent Tonal Elevation Across All Views)
    ========================================================================== */
 
-/* Base canvas & elevation surfaces */
+/* Base canvas & elevation surfaces (including opacity-modified Tailwind classes like bg-slate-50/70) */
 .dark .bg-\[\#F8FAFC\] {
   background-color: var(--rf-bg-base);
 }
-.dark .bg-white:not(.rf-keep-light) {
+.dark .bg-white:not(.rf-keep-light):not([class*="dark:bg-"]),
+.dark [class*="bg-white/"]:not(.rf-keep-light):not([class*="dark:bg-"]) {
   background-color: var(--rf-surface-1);
 }
-.dark .bg-slate-50 {
+.dark .bg-slate-50:not([class*="dark:bg-"]),
+.dark [class*="bg-slate-50/"]:not([class*="dark:bg-"]) {
   background-color: var(--rf-surface-2);
 }
-.dark .bg-slate-100 {
+.dark .bg-slate-100:not([class*="dark:bg-"]),
+.dark [class*="bg-slate-100/"]:not([class*="dark:bg-"]) {
   background-color: var(--rf-surface-3);
 }
-.dark .bg-slate-200 {
-  background-color: var(--rf-surface-hover);
+.dark .bg-slate-200:not([class*="dark:bg-"]),
+.dark [class*="bg-slate-200/"]:not([class*="dark:bg-"]) {
+  background-color: var(--rf-surface-3);
 }
 
 /* Modals & popovers step up to Elevation 3 */
@@ -124,12 +128,14 @@ html.dark {
   border-color: var(--rf-border-strong);
 }
 
-/* Hover elevations */
+/* Hover elevations (including opacity-modified hover classes like hover:bg-slate-50/70) */
 .dark .hover\:bg-slate-50:hover,
+.dark [class*="hover:bg-slate-50/"]:hover,
 .dark .hover\:bg-white:hover {
   background-color: var(--rf-surface-2);
 }
-.dark .hover\:bg-slate-100:hover {
+.dark .hover\:bg-slate-100:hover,
+.dark [class*="hover:bg-slate-100/"]:hover {
   background-color: var(--rf-surface-hover);
 }
 
@@ -209,15 +215,19 @@ html.dark {
   color: rgba(228, 230, 235, 0.84);
 }
 
-/* Desaturated accent & semantic surfaces */
-.dark .bg-sky-50 {
+/* Desaturated accent & semantic surfaces (including opacity-modified bg-sky-50/60, bg-amber-50/70, etc.) */
+.dark .bg-sky-50:not([class*="dark:bg-"]),
+.dark [class*="bg-sky-50/"]:not([class*="dark:bg-"]) {
   background-color: var(--rf-accent-soft);
 }
-.dark .bg-sky-100 {
+.dark .bg-sky-100:not([class*="dark:bg-"]),
+.dark [class*="bg-sky-100/"]:not([class*="dark:bg-"]) {
   background-color: rgba(104, 174, 224, 0.18);
 }
 .dark .border-sky-200,
-.dark .border-sky-300 {
+.dark .border-sky-300,
+.dark [class*="border-sky-200/"],
+.dark [class*="border-sky-300/"] {
   border-color: var(--rf-accent-border);
 }
 .dark .text-sky-600,
@@ -227,7 +237,9 @@ html.dark {
   color: var(--rf-accent);
 }
 
-.dark .bg-emerald-50 {
+.dark .bg-emerald-50:not([class*="dark:bg-"]),
+.dark [class*="bg-emerald-50/"]:not([class*="dark:bg-"]),
+.dark [class*="bg-emerald-100/"]:not([class*="dark:bg-"]) {
   background-color: var(--rf-success-soft);
 }
 .dark .border-emerald-200 {
@@ -238,7 +250,8 @@ html.dark {
   color: var(--rf-success);
 }
 
-.dark .bg-amber-50 {
+.dark .bg-amber-50:not([class*="dark:bg-"]),
+.dark [class*="bg-amber-50/"]:not([class*="dark:bg-"]) {
   background-color: var(--rf-warning-soft);
 }
 .dark .border-amber-200 {
@@ -249,8 +262,10 @@ html.dark {
   color: var(--rf-warning);
 }
 
-.dark .bg-red-50,
-.dark .bg-rose-50 {
+.dark .bg-red-50:not([class*="dark:bg-"]),
+.dark [class*="bg-red-50/"]:not([class*="dark:bg-"]),
+.dark .bg-rose-50:not([class*="dark:bg-"]),
+.dark [class*="bg-rose-50/"]:not([class*="dark:bg-"]) {
   background-color: var(--rf-error-soft);
 }
 .dark .border-red-200,
