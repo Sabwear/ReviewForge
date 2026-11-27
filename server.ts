@@ -678,6 +678,11 @@ function getServerAIEnv(): ServerAIEnv {
   return {
     GEMINI_API_KEY: process.env.GEMINI_API_KEY,
     GEMINI_MODEL: process.env.GEMINI_MODEL,
+    GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
+    GOOGLE_GENERATIVE_AI_API_KEY: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+    VITE_GEMINI_API_KEY: process.env.VITE_GEMINI_API_KEY,
+    API_KEY: process.env.API_KEY,
+    AI_API_KEY: process.env.AI_API_KEY,
     OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
     GROQ_API_KEY: process.env.GROQ_API_KEY,

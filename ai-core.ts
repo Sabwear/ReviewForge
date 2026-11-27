@@ -22,6 +22,11 @@ export interface AIConfigPayload {
 export interface ServerAIEnv {
   GEMINI_API_KEY?: string;
   GEMINI_MODEL?: string;
+  GOOGLE_API_KEY?: string;
+  GOOGLE_GENERATIVE_AI_API_KEY?: string;
+  VITE_GEMINI_API_KEY?: string;
+  API_KEY?: string;
+  AI_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
   OPENAI_API_KEY?: string;
   GROQ_API_KEY?: string;
@@ -130,14 +135,20 @@ function resolveEnvFallbackCredentials(env: ServerAIEnv): {
         : guessProviderFromKey(fallbackKey),
     };
   }
-  const geminiKey = cleanEnv(env.GEMINI_API_KEY);
-  if (geminiKey) return { apiKey: geminiKey, provider: 'gemini' };
+  const geminiKey =
+    cleanEnv(env.GEMINI_API_KEY) ||
+    cleanEnv(env.GOOGLE_API_KEY) ||
+    cleanEnv(env.GOOGLE_GENERATIVE_AI_API_KEY) ||
+    cleanEnv(env.VITE_GEMINI_API_KEY);
+  if (geminiKey) return { apiKey: geminiKey, provider: guessProviderFromKey(geminiKey) };
   const openrouterKey = cleanEnv(env.OPENROUTER_API_KEY);
   if (openrouterKey) return { apiKey: openrouterKey, provider: 'openrouter' };
   const openaiKey = cleanEnv(env.OPENAI_API_KEY);
   if (openaiKey) return { apiKey: openaiKey, provider: 'openai' };
   const groqKey = cleanEnv(env.GROQ_API_KEY);
   if (groqKey) return { apiKey: groqKey, provider: 'groq' };
+  const genericKey = cleanEnv(env.AI_API_KEY) || cleanEnv(env.API_KEY);
+  if (genericKey) return { apiKey: genericKey, provider: guessProviderFromKey(genericKey) };
   return null;
 }
 
