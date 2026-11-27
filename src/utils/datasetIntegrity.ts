@@ -8,6 +8,8 @@ export interface IntegrityIssue {
 
 export interface DatasetIntegrityReport {
   totalReviews: number;
+  uniqueEmailCount: number;
+  duplicateEmailCount: number;
   repeatedSentenceCount: number;
   repeatReviewerCount: number;
   repeatDateIssues: number;
@@ -156,8 +158,13 @@ export function runDatasetIntegrityAudit(reviews: GeneratedReview[]): DatasetInt
     }
   }
 
+  const uniqueEmailCount = byEmail.size;
+  const duplicateEmailCount = Math.max(0, reviews.length - uniqueEmailCount);
+
   return {
     totalReviews: reviews.length,
+    uniqueEmailCount,
+    duplicateEmailCount,
     repeatedSentenceCount: repeatedReviewIds.size,
     repeatReviewerCount,
     repeatDateIssues,

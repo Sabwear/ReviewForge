@@ -1157,13 +1157,26 @@ export function ConfigSidebar({
 
         {/* Returning customers % */}
         <div className="space-y-2 pt-3 border-t border-slate-100">
-          <div className="flex items-center justify-between text-xs">
+          <div className="flex items-center justify-between text-xs gap-2">
             <label htmlFor="returning-rate" className="font-medium text-slate-700">
               Returning client rate
             </label>
-            <span className="font-mono tabular-nums font-semibold text-slate-900">
-              ~{config.returningCustomerRate}%
-            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => onConfigChange({ ...config, returningCustomerRate: 0 })}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors cursor-pointer ${
+                  config.returningCustomerRate === 0
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                100% Unique Emails
+              </button>
+              <span className="font-mono tabular-nums font-semibold text-slate-900">
+                {config.returningCustomerRate === 0 ? '0%' : `~${config.returningCustomerRate}%`}
+              </span>
+            </div>
           </div>
           <input
             id="returning-rate"
@@ -1181,47 +1194,139 @@ export function ConfigSidebar({
             className="w-full accent-sky-700 cursor-pointer"
           />
           <p className="text-xs text-slate-500">
-            Reuses real buyer names & emails across different offerings with spaced dates.
+            {config.returningCustomerRate === 0
+              ? 'Every generated review gets a 100% unique reviewer name and email address.'
+              : 'Reuses a few buyer names & emails across different offerings with >=21 day gaps.'}
           </p>
         </div>
 
-        {/* Date Window */}
-        <div className="pt-3 border-t border-slate-100 grid grid-cols-2 gap-3">
-          <div>
-            <label
-              htmlFor="date-start"
-              className="block text-xs text-slate-500 mb-1"
-            >
-              From date
-            </label>
-            <input
-              id="date-start"
-              type="date"
-              value={config.dateStart}
-              onChange={(e) =>
-                onConfigChange({ ...config, dateStart: e.target.value })
-              }
-              className="w-full h-10 px-2.5 rounded-lg border border-slate-300 bg-white font-mono text-xs text-slate-900 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/20"
-            />
-          </div>
-          <div>
-            <label
-              htmlFor="date-end"
-              className="block text-xs text-slate-500 mb-1"
-            >
-              To date
-            </label>
-            <input
-              id="date-end"
-              type="date"
-              value={config.dateEnd}
-              onChange={(e) =>
-                onConfigChange({ ...config, dateEnd: e.target.value })
-              }
-              className="w-full h-10 px-2.5 rounded-lg border border-slate-300 bg-white font-mono text-xs text-slate-900 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/20"
-            />
-          </div>
-        </div>
+        {/* Date Window — Month-by-Month Slider + Radio Presets */}
+        {(() => {
+          const endDate = config.dateEnd ? new Date(`${config.dateEnd}T00:00:00`) : new Date();
+          const startDate = config.dateStart ? new Date(`${config.dateStart}T00:00:00`) : new Date();
+          const approxMonths = Math.max(
+            1,
+            Math.min(
+              36,
+              Math.round((endDate.getTime() - startDate.getTime()) / (30.4375 * 86400000))
+            )
+          );
+          const applyMonthsBack = (months: number) => {
+            const safeEnd = new Date();
+            const nextStart = new Date(safeEnd);
+            nextStart.setMonth(nextStart.getMonth() - months);
+            onConfigChange({
+              ...config,
+              dateStart: nextStart.toISOString().split('T')[0],
+              dateEnd: safeEnd.toISOString().split('T')[0],
+            });
+          };
+          const formatMonthsLabel = (m: number) => {
+            if (m === 12) return '1 year';
+            if (m === 24) return '2 years';
+            if (m === 36) return '3 years';
+            if (m > 12 && m % 12 === 0) return `${m / 12} years`;
+            return `${m} ${m === 1 ? 'month' : 'months'}`;
+          };
+
+          return (
+            <div className="pt-3 border-t border-slate-100 space-y-3">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <label htmlFor="date-months-slider" className="font-medium text-slate-700">
+                    Review date span
+                  </label>
+                  <span className="font-mono tabular-nums font-semibold text-sky-700">
+                    Last {formatMonthsLabel(approxMonths)}
+                  </span>
+                </div>
+
+                {/* Month-by-month slider (1 to 36 months) */}
+                <input
+                  id="date-months-slider"
+                  type="range"
+                  min={1}
+                  max={36}
+                  step={1}
+                  value={approxMonths}
+                  onChange={(e) => applyMonthsBack(Number(e.target.value))}
+                  className="w-full accent-sky-700 cursor-pointer"
+                />
+
+                {/* Quick Radio Presets */}
+                <div
+                  role="radiogroup"
+                  aria-label="Review date range presets"
+                  className="grid grid-cols-6 gap-1"
+                >
+                  {[
+                    { label: '3m', months: 3 },
+                    { label: '6m', months: 6 },
+                    { label: '12m', months: 12 },
+                    { label: '18m', months: 18 },
+                    { label: '2y', months: 24 },
+                    { label: '3y', months: 36 },
+                  ].map((opt) => {
+                    const checked = approxMonths === opt.months;
+                    return (
+                      <button
+                        key={opt.label}
+                        type="button"
+                        role="radio"
+                        aria-checked={checked}
+                        onClick={() => applyMonthsBack(opt.months)}
+                        className={`py-1 text-[11px] font-mono font-semibold rounded-md transition-colors cursor-pointer ${
+                          checked
+                            ? 'bg-sky-700 text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label
+                    htmlFor="date-start"
+                    className="block text-xs text-slate-500 mb-1"
+                  >
+                    From date
+                  </label>
+                  <input
+                    id="date-start"
+                    type="date"
+                    value={config.dateStart}
+                    onChange={(e) =>
+                      onConfigChange({ ...config, dateStart: e.target.value })
+                    }
+                    className="w-full h-10 px-2.5 rounded-lg border border-slate-300 bg-white font-mono text-xs text-slate-900 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/20"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="date-end"
+                    className="block text-xs text-slate-500 mb-1"
+                  >
+                    To date
+                  </label>
+                  <input
+                    id="date-end"
+                    type="date"
+                    value={config.dateEnd}
+                    onChange={(e) =>
+                      onConfigChange({ ...config, dateEnd: e.target.value })
+                    }
+                    className="w-full h-10 px-2.5 rounded-lg border border-slate-300 bg-white font-mono text-xs text-slate-900 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/20"
+                  />
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Active Realism Safeguards Note */}
         <div className="pt-3 border-t border-slate-100 text-xs text-slate-500 space-y-1">

@@ -646,8 +646,13 @@ export function AIDetectorView({
                 <span>Verify All Clean Rows</span>
               </button>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5 text-xs">
               {[
+                {
+                  label: 'Unique Emails',
+                  val: `${integrity.uniqueEmailCount}/${reviews.length}`,
+                  ok: integrity.duplicateEmailCount === 0,
+                },
                 {
                   label: 'Repeated Sentences',
                   val: integrity.repeatedSentenceCount,
