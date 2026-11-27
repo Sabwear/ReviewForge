@@ -11,11 +11,14 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  ShieldCheck,
   Sparkles,
   Star,
   Trash2,
   Upload,
+  Wand2,
 } from 'lucide-react';
+import { FlagBadge } from './FlagBadge';
 import { SAMPLE_BUSINESSES } from '../data/sampleCatalog';
 import {
   CatalogProduct,
@@ -65,6 +68,17 @@ interface WorkbenchViewProps {
   onExportCSV: () => void;
   onCopyCSV: () => Promise<boolean>;
   onOpenDatasetTab: () => void;
+  aiOnline: boolean;
+  onOpenAISettings: () => void;
+  onAuditReviews: (targetReviews: GeneratedReview[]) => Promise<void>;
+  onRewriteFlaggedReviews: (flaggedReviews: GeneratedReview[]) => Promise<void>;
+  isAuditingReviews: boolean;
+  isRewritingReviews: boolean;
+  auditError: string | null;
+  reviewAuditMap: Record<
+    string,
+    { humanScore: number; verdict: 'human' | 'generic' | 'ai_flagged'; reason: string }
+  >;
 }
 
 const VOICE_LABELS: Record<string, string> = {
@@ -130,6 +144,14 @@ export function WorkbenchView({
   onExportCSV,
   onCopyCSV,
   onOpenDatasetTab,
+  aiOnline,
+  onOpenAISettings,
+  onAuditReviews,
+  onRewriteFlaggedReviews,
+  isAuditingReviews,
+  isRewritingReviews,
+  auditError,
+  reviewAuditMap,
 }: WorkbenchViewProps) {
   const emptyFileInputRef = useRef<HTMLInputElement>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -945,6 +967,114 @@ export function WorkbenchView({
           </div>
         )}
 
+        {/* AI Authenticity & Genericness Detector Bar */}
+        {visibleReviews.length > 0 && (() => {
+          const auditedVisible = visibleReviews
+            .map((r) => ({ review: r, audit: reviewAuditMap[r.id] }))
+            .filter((x) => Boolean(x.audit));
+          const flaggedVisible = auditedVisible
+            .filter((x) => x.audit.verdict !== 'human')
+            .map((x) => x.review);
+          const avgHuman =
+            auditedVisible.length > 0
+              ? Math.round(
+                  auditedVisible.reduce((s, x) => s + x.audit.humanScore, 0) /
+                    auditedVisible.length
+                )
+              : null;
+
+          return (
+            <div className="px-5 py-3 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2.5 text-xs">
+                <span className="inline-flex items-center gap-1.5 font-semibold text-slate-800">
+                  <ShieldCheck className="w-4 h-4 text-sky-600" aria-hidden="true" />
+                  <span>AI Review Detector</span>
+                </span>
+                {avgHuman !== null ? (
+                  <>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[11px] font-semibold font-mono ${
+                        avgHuman >= 80
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : avgHuman >= 60
+                          ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                          : 'bg-rose-50 text-rose-700 border border-rose-200'
+                      }`}
+                    >
+                      {avgHuman}% Human Score ({auditedVisible.length} checked)
+                    </span>
+                    {flaggedVisible.length > 0 && (
+                      <span className="text-[11px] text-rose-700 font-medium">
+                        {flaggedVisible.length} generic / AI-flagged
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-slate-500">
+                    Check if generated reviews sound generic, off-domain, or AI-written.
+                  </span>
+                )}
+                {auditError && (
+                  <span className="text-[11px] text-rose-600 font-medium">{auditError}</span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                {flaggedVisible.length > 0 && (
+                  <button
+                    type="button"
+                    disabled={isRewritingReviews || isAuditingReviews}
+                    onClick={() => onRewriteFlaggedReviews(flaggedVisible)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 disabled:opacity-50 rounded-lg transition-all cursor-pointer"
+                  >
+                    {isRewritingReviews ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Wand2 className="w-3.5 h-3.5" />
+                    )}
+                    <span>
+                      {isRewritingReviews
+                        ? 'Rewriting…'
+                        : `AI Rewrite Flagged (${flaggedVisible.length})`}
+                    </span>
+                  </button>
+                )}
+
+                {aiOnline ? (
+                  <button
+                    type="button"
+                    disabled={isAuditingReviews || isRewritingReviews}
+                    onClick={() => onAuditReviews(visibleReviews.slice(0, 35))}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-800 bg-white hover:bg-slate-100 border border-slate-300 disabled:opacity-50 rounded-lg transition-colors cursor-pointer"
+                  >
+                    {isAuditingReviews ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-600" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5 text-sky-600" />
+                    )}
+                    <span>
+                      {isAuditingReviews
+                        ? 'Scanning…'
+                        : auditedVisible.length > 0
+                        ? 'Re-Scan Batch'
+                        : `Detect AI / Generic (${Math.min(35, visibleReviews.length)})`}
+                    </span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onOpenAISettings}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-lg transition-colors cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Connect AI to Detect</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
         {visibleReviews.length === 0 ? (
           <div className="px-6 py-14 text-center">
             <p className="text-sm font-medium text-slate-900">
@@ -994,8 +1124,14 @@ export function WorkbenchView({
                         {review.review_date}
                       </span>
                       <span aria-hidden="true">·</span>
-                      <span className="inline-flex items-center gap-1">
-                        <span aria-hidden="true">{languageMetaMap[review.language]?.flag}</span>
+                      <span className="inline-flex items-center gap-1.5">
+                        {languageMetaMap[review.language] && (
+                          <FlagBadge
+                            countryCode={languageMetaMap[review.language].countryCode}
+                            emoji={languageMetaMap[review.language].flag}
+                            size="sm"
+                          />
+                        )}
                         <span>{languageMetaMap[review.language]?.label || review.language}</span>
                       </span>
                       <span aria-hidden="true">·</span>
@@ -1020,9 +1156,39 @@ export function WorkbenchView({
                           </span>
                         </>
                       )}
+                      {reviewAuditMap[review.id] && (() => {
+                        const audit = reviewAuditMap[review.id];
+                        return (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span
+                              title={audit.reason}
+                              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                                audit.verdict === 'human'
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : audit.verdict === 'generic'
+                                  ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                  : 'bg-rose-50 text-rose-700 border border-rose-200'
+                              }`}
+                            >
+                              {audit.verdict === 'human'
+                                ? `Human ${audit.humanScore}%`
+                                : audit.verdict === 'generic'
+                                ? `Generic ${audit.humanScore}%`
+                                : `AI Flagged ${audit.humanScore}%`}
+                            </span>
+                          </>
+                        );
+                      })()}
                     </div>
 
-                    <div dir={review.language === 'ar' ? 'rtl' : 'ltr'}>
+                    {reviewAuditMap[review.id] && reviewAuditMap[review.id].verdict !== 'human' && (
+                      <p className="text-[11px] text-amber-700 pt-0.5">
+                        Detector note: {reviewAuditMap[review.id].reason}
+                      </p>
+                    )}
+
+                    <div dir={review.language === 'ar' || review.language === 'he' ? 'rtl' : 'ltr'}>
                       <h3 className="text-sm font-semibold text-slate-900 pt-1">
                         {review.subject}
                       </h3>

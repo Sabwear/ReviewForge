@@ -1,14 +1,17 @@
 // Cloudflare Worker entry: serves the built SPA (static assets) and the /api routes.
 import {
+  detectReviewsWithAI,
   generateJsonWithAI,
   getFallbackInfo,
   isFallbackSecretValid,
   listProviderModels,
   resolveAIConfig,
+  rewriteReviewsWithAI,
   SCAN_WEBSITE_JSON_HINT,
   VOICE_PACK_JSON_HINT,
   type AIConfigPayload,
   type AIUsageMetrics,
+  type ReviewAuditInput,
   type ServerAIEnv,
 } from './ai-core.ts';
 import {
@@ -283,7 +286,11 @@ User notes: ${businessContext || '(Auto-detect)'}
 ${shopifySection}
 ${pagesSection}
 Target languages: ${languages.join(', ')}
-Rules: Extract 6–18 real services/products (or use the Shopify list above), classify into 2–5 categories, generate categoryContext + full 5..1 star languagePacks per language. Keep low-star reviews benign (no scam/fraud claims). Use ONLY placeholders {product}, {contextA}, {contextB}, {duration}, {timeframe}.`;
+CRITICAL RULES:
+1. Determine accurately if this is a "service" business (plumber, heating/boiler technician, electrician, clinic, agency, salon, repair, cleaning, etc.) or an "ecommerce" store selling shipped physical goods.
+2. Extract 6–15 CONCRETE, REAL services or products actually offered. NEVER include city/location names (e.g. Brussel, Gent), generic navigation labels ("Our services", "Service areas", "About us", "Contact"), or marketing headlines/slogans as items!
+3. If this is a SERVICE business: EVERY review sentence MUST sound like a real client who booked an appointment / technician / intervention (punctuality, diagnosis, clean work, fair quote, fixed problem). STRICTLY FORBIDDEN words for service businesses: "bought", "ordered", "shipping", "delivery", "box", "packaging", "colis", "emballage", "cet article", "dit artikel", "cadeau", "product photos", "swap variant".
+4. Classify into 2–4 clean categories, generate categoryContext + full 5..1 star languagePacks per language. Keep low-star reviews benign (no scam/fraud claims). Use ONLY placeholders {product}, {contextA}, {contextB}, {duration}, {timeframe}.`;
 
         const aiResult = await generateJsonWithAI<WorkerParsedScan>(body?.aiConfig, env, {
           systemInstruction:
@@ -361,6 +368,56 @@ Rules: Extract 6–18 real services/products (or use the Shopify list above), cl
   }
 }
 
+async function handleDetectReviews(req: Request, env: Env): Promise<Response> {
+  let body: { reviews?: ReviewAuditInput[]; businessContext?: string; aiConfig?: AIConfigPayload };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return json({ error: 'Invalid request body.' }, 400);
+  }
+  const reviews = Array.isArray(body?.reviews) ? body.reviews : [];
+  if (reviews.length === 0) return json({ error: 'No reviews to audit.' }, 400);
+  if (!resolveAIConfig(body?.aiConfig, env)) {
+    return json({ error: 'Connect an AI provider (or unlock Fallback AI) to run the AI Authenticity Detector.' }, 403);
+  }
+  try {
+    const { results, usage } = await detectReviewsWithAI(
+      body?.aiConfig,
+      env,
+      reviews,
+      typeof body?.businessContext === 'string' ? body.businessContext.slice(0, 400) : ''
+    );
+    return json({ results, aiUsage: usage });
+  } catch (e) {
+    return json({ error: e instanceof Error ? e.message : 'AI detection failed.' }, 500);
+  }
+}
+
+async function handleRewriteReviews(req: Request, env: Env): Promise<Response> {
+  let body: { reviews?: ReviewAuditInput[]; businessContext?: string; aiConfig?: AIConfigPayload };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return json({ error: 'Invalid request body.' }, 400);
+  }
+  const reviews = Array.isArray(body?.reviews) ? body.reviews : [];
+  if (reviews.length === 0) return json({ error: 'No flagged reviews to rewrite.' }, 400);
+  if (!resolveAIConfig(body?.aiConfig, env)) {
+    return json({ error: 'Connect an AI provider (or unlock Fallback AI) to rewrite flagged reviews.' }, 403);
+  }
+  try {
+    const { rewrites, usage } = await rewriteReviewsWithAI(
+      body?.aiConfig,
+      env,
+      reviews,
+      typeof body?.businessContext === 'string' ? body.businessContext.slice(0, 400) : ''
+    );
+    return json({ rewrites, aiUsage: usage });
+  } catch (e) {
+    return json({ error: e instanceof Error ? e.message : 'AI rewrite failed.' }, 500);
+  }
+}
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const { pathname } = new URL(req.url);
@@ -377,6 +434,12 @@ export default {
     }
     if (pathname === '/api/ai/verify-secret') {
       return req.method === 'POST' ? handleVerifySecret(req, env) : json({ error: 'Method not allowed. Use POST.' }, 405);
+    }
+    if (pathname === '/api/ai/detect-reviews') {
+      return req.method === 'POST' ? handleDetectReviews(req, env) : json({ error: 'Method not allowed. Use POST.' }, 405);
+    }
+    if (pathname === '/api/ai/rewrite-reviews') {
+      return req.method === 'POST' ? handleRewriteReviews(req, env) : json({ error: 'Method not allowed. Use POST.' }, 405);
     }
     if (pathname === '/api/scan-website') {
       return req.method === 'POST' ? scanWebsite(req, env) : json({ error: 'Method not allowed. Use POST.' }, 405);

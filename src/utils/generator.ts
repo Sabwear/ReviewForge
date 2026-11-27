@@ -7,6 +7,13 @@ import {
 } from '../data/reviewComposer';
 import { NAMES_BY_LANGUAGE } from '../data/reviewTemplates';
 import {
+  getServiceFallbackReference,
+  isServiceCatalog,
+  SERVICE_EXTRA_TAILS,
+  SERVICE_SENTENCE_BANKS,
+  SERVICE_TOKENS,
+} from '../data/serviceComposer';
+import {
   BUILTIN_CATEGORY_CONTEXTS,
   UNIVERSAL_COMPOSER_TOKENS,
   UNIVERSAL_EXTRA_TAILS,
@@ -171,8 +178,12 @@ function cleanProductLabel(itemName: string, iptvMode: boolean): string {
 function getFallbackProductReference(
   category: string,
   language: ReviewLanguage,
-  iptvMode: boolean
+  iptvMode: boolean,
+  serviceMode = false
 ): string {
+  if (serviceMode && !iptvMode) {
+    return getServiceFallbackReference(language);
+  }
   if (iptvMode) {
     if (language === 'fr') {
       if (category === 'Player Activation') return 'cette appli';
@@ -238,13 +249,17 @@ function hydrateUniversalTokens(
   product: CatalogProduct,
   language: ReviewLanguage,
   tokens: BusinessLanguageTokens,
-  forceLiteralProduct = false
+  forceLiteralProduct = false,
+  serviceMode = false
 ): string {
-  const fallbackTokens = UNIVERSAL_COMPOSER_TOKENS[language] || UNIVERSAL_COMPOSER_TOKENS.en;
+  const fallbackTokens =
+    (serviceMode ? SERVICE_TOKENS[language] : undefined) ||
+    UNIVERSAL_COMPOSER_TOKENS[language] ||
+    UNIVERSAL_COMPOSER_TOKENS.en;
   const useLiteralName = forceLiteralProduct || Math.random() < 0.62;
   const productRef = useLiteralName
     ? cleanProductLabel(product.item_name, false)
-    : getFallbackProductReference(product.category, language, false);
+    : getFallbackProductReference(product.category, language, false, serviceMode);
 
   const pickSafe = (arr: string[] | undefined, fallback: string[]) =>
     arr && arr.length > 0 ? pickRandom(arr) : pickRandom(fallback);
@@ -315,7 +330,8 @@ function composeCandidateCopy(
   adaptedPack: BusinessVoicePack | null,
   iptvMode: boolean,
   forceExtraTail: boolean,
-  forceLiteralProduct: boolean
+  forceLiteralProduct: boolean,
+  serviceMode = false
 ): { subject: string; body: string; voice: ReviewerVoice } {
   const adaptedLangPack = findAdaptedLanguagePack(adaptedPack, language);
   const catContext = !iptvMode
@@ -324,6 +340,7 @@ function composeCandidateCopy(
 
   const baseTokens =
     adaptedLangPack?.tokens ||
+    (serviceMode ? SERVICE_TOKENS[language] || SERVICE_TOKENS.en : undefined) ||
     UNIVERSAL_COMPOSER_TOKENS[language] ||
     UNIVERSAL_COMPOSER_TOKENS.en;
 
@@ -343,7 +360,7 @@ function composeCandidateCopy(
   const hydrate = (text: string) =>
     useIPTVBank
       ? hydrateIPTVTokens(text, product, language, forceLiteralProduct)
-      : hydrateUniversalTokens(text, product, language, effectiveTokens, forceLiteralProduct);
+      : hydrateUniversalTokens(text, product, language, effectiveTokens, forceLiteralProduct, serviceMode);
 
   // 25% chance to pull from user-created custom templates if matching category/language/stars exist
   const matchingCustom = customTemplates.filter(
@@ -389,14 +406,26 @@ function composeCandidateCopy(
     middles = pool.middles;
     closers = pool.closers;
     extraTails = EXTRA_CONTEXT_TAILS[language] || EXTRA_CONTEXT_TAILS.en!;
-  } else {
-    const langBank = UNIVERSAL_SENTENCE_BANKS[language] || UNIVERSAL_SENTENCE_BANKS.en;
+  } else if (serviceMode && SERVICE_SENTENCE_BANKS[language]) {
+    const langBank = SERVICE_SENTENCE_BANKS[language]!;
     const pool = langBank[stars] || langBank[5];
     subjects = pool.subjects;
     openers = pool.openers;
     middles = pool.middles;
     closers = pool.closers;
-    extraTails = UNIVERSAL_EXTRA_TAILS[language] || UNIVERSAL_EXTRA_TAILS.en;
+    extraTails = SERVICE_EXTRA_TAILS[language] || SERVICE_EXTRA_TAILS.en || [];
+  } else {
+    const langBank = serviceMode
+      ? SERVICE_SENTENCE_BANKS.en!
+      : UNIVERSAL_SENTENCE_BANKS[language] || UNIVERSAL_SENTENCE_BANKS.en;
+    const pool = langBank[stars] || langBank[5];
+    subjects = pool.subjects;
+    openers = pool.openers;
+    middles = pool.middles;
+    closers = pool.closers;
+    extraTails = serviceMode
+      ? SERVICE_EXTRA_TAILS[language] || SERVICE_EXTRA_TAILS.en || []
+      : UNIVERSAL_EXTRA_TAILS[language] || UNIVERSAL_EXTRA_TAILS.en;
   }
 
   // Blend in category-specific openers & middles for 4★ and 5★ reviews
@@ -459,7 +488,8 @@ function composeUniqueReviewCopy(
   adaptedPack: BusinessVoicePack | null,
   iptvMode: boolean,
   globalUsedBodies: Set<string>,
-  productUsedSubjects: Set<string>
+  productUsedSubjects: Set<string>,
+  serviceMode = false
 ): { subject: string; body: string; voice: ReviewerVoice } {
   // Phase 1: Up to 30 organic compositions with unique body + unique per-product subject
   for (let attempt = 0; attempt < 30; attempt++) {
@@ -471,7 +501,8 @@ function composeUniqueReviewCopy(
       adaptedPack,
       iptvMode,
       attempt >= 16,
-      attempt >= 10
+      attempt >= 10,
+      serviceMode
     );
     const normBody = normalizeReviewBody(candidate.body);
     const normSubj = normalizeReviewBody(candidate.subject);
@@ -493,7 +524,8 @@ function composeUniqueReviewCopy(
       adaptedPack,
       iptvMode,
       true,
-      true
+      true,
+      serviceMode
     );
     const normBody = normalizeReviewBody(candidate.body);
     if (!globalUsedBodies.has(normBody)) {
@@ -511,7 +543,8 @@ function composeUniqueReviewCopy(
     adaptedPack,
     iptvMode,
     true,
-    true
+    true,
+    serviceMode
   );
   const adaptedLangPack = findAdaptedLanguagePack(adaptedPack, language);
   const useIPTVTails = iptvMode && !adaptedLangPack && Boolean(EXTRA_CONTEXT_TAILS[language]);
@@ -519,9 +552,12 @@ function composeUniqueReviewCopy(
     ? adaptedLangPack.extraTails
     : useIPTVTails
       ? EXTRA_CONTEXT_TAILS[language]!
-      : UNIVERSAL_EXTRA_TAILS[language] || UNIVERSAL_EXTRA_TAILS.en;
+      : serviceMode
+        ? SERVICE_EXTRA_TAILS[language] || SERVICE_EXTRA_TAILS.en || []
+        : UNIVERSAL_EXTRA_TAILS[language] || UNIVERSAL_EXTRA_TAILS.en;
   const universalTokens =
     adaptedLangPack?.tokens ||
+    (serviceMode ? SERVICE_TOKENS[language] || SERVICE_TOKENS.en : undefined) ||
     UNIVERSAL_COMPOSER_TOKENS[language] ||
     UNIVERSAL_COMPOSER_TOKENS.en;
 
@@ -530,7 +566,7 @@ function composeUniqueReviewCopy(
     const extraSentence =
       useIPTVTails
         ? hydrateIPTVTokens(rawTail, product, language, true)
-        : hydrateUniversalTokens(rawTail, product, language, universalTokens, true);
+        : hydrateUniversalTokens(rawTail, product, language, universalTokens, true, serviceMode);
     const merged = `${fallback.body} ${extraSentence}`.trim();
     const norm = normalizeReviewBody(merged);
     if (!globalUsedBodies.has(norm)) {
@@ -694,6 +730,7 @@ export function generateSingleReviewForProduct(
   const startMs = Date.parse(config.dateStart) || Date.now() - 180 * 86400000;
   const endMs = Math.max(startMs + 86400000, Date.parse(config.dateEnd) || Date.now());
   const iptvMode = !adaptedPack && isIPTVCatalog(allProductsForDetection);
+  const serviceMode = !iptvMode && isServiceCatalog(allProductsForDetection);
 
   const language = forcedLanguage ?? pickLanguage(config.selectedLanguages);
   const stars = pickOrganicStar();
@@ -705,7 +742,8 @@ export function generateSingleReviewForProduct(
     adaptedPack,
     iptvMode,
     globalUsedBodies,
-    new Set()
+    new Set(),
+    serviceMode
   );
 
   const identity =
@@ -749,6 +787,7 @@ export function generateReviewDataset(
   if (eligible.length === 0 || config.selectedLanguages.length === 0) return [];
 
   const iptvMode = !adaptedPack && isIPTVCatalog(products);
+  const serviceMode = !iptvMode && isServiceCatalog(products);
   const startMs = Date.parse(config.dateStart) || Date.now() - 180 * 86400000;
   const endMs = Math.max(startMs + 86400000, Date.parse(config.dateEnd) || Date.now());
 
@@ -884,7 +923,8 @@ export function generateReviewDataset(
         adaptedPack,
         iptvMode,
         globalUsedBodies,
-        productUsedSubjects
+        productUsedSubjects,
+        serviceMode
       );
 
       emailFrequency.set(chosenEmail, (emailFrequency.get(chosenEmail) || 0) + 1);

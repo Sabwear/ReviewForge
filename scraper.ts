@@ -16,10 +16,16 @@ type Fetcher = (
 ) => Promise<{ finalUrl: URL; status: number; contentType: string; text: string }>;
 
 const SIGNAL_PATH =
-  /\/(services?|solutions?|offerings?|pricing|plans?|packages?|treatments?|menu|products?|collections?|shop|store|catalog|features?|programs?|courses?|prestations?|produits?|tarifs?|soins?|categor(?:y|ies))\//i;
+  /\/(services?|solutions?|offerings?|pricing|plans?|packages?|treatments?|menu|products?|collections?|shop|store|catalog|features?|programs?|courses?|prestations?|produits?|tarifs?|soins?|diensten|interventions?|depannage|reparations?)\//i;
+
+const JUNK_PATH =
+  /\/(legal|customers?|glossary|terms|privacy|careers?|jobs|press|blog|news|support|help|docs|contact|about|over-ons|a-propos|login|signin|signup|cart|account|service-areas?|areas?|locations?|cities|werkgebied|zones?|regio|steden|faq|reviews?|testimonials?|partners?|author|tag|category)(\/|$)/i;
 
 const JUNK_NAME =
-  /^(home|about( us)?|contact( us)?|blog|news|faq|login|log in|sign ?up|register|cart|checkout|privacy|terms|policy|search|menu|skip to content|read more|learn more|get started|book now|view all|shop all)$/i;
+  /^(home|about( us)?|contact( us)?|blog|news|faq|login|log in|sign ?up|register|cart|checkout|privacy|terms|policy|search|menu|skip to content|read more|learn more|get started|book now|view all|shop all|services?|our services|all services|service areas?|areas? we serve|locations?|solutions?|our solutions|products?|our products|pricing|plans?|about .+|why choose us|how it works|testimonials?|reviews?|contact|get a quote|request a quote|free quote|call now|whatsapp)$/i;
+
+const MARKETING_SLOGAN_START =
+  /^(your |about |why |how |what |who |where |clear |advice |trusted |authorized |certified |welcome |discover |meet |get |find |need |looking for |serving |available )/i;
 
 function slugify(v: string, i: number): string {
   const s = v
@@ -50,10 +56,13 @@ function cleanText(v: unknown): string {
 }
 
 function goodName(n: string): boolean {
-  return n.length >= 3 && n.length <= 70 && n.split(' ').length <= 9 && !JUNK_NAME.test(n);
+  const words = n.split(/\s+/).filter(Boolean);
+  if (n.length < 3 || n.length > 58 || words.length > 6) return false;
+  if (JUNK_NAME.test(n)) return false;
+  if (MARKETING_SLOGAN_START.test(n)) return false;
+  if (/[?!]/.test(n)) return false;
+  return true;
 }
-
-const JUNK_PATH = /\/(legal|customers?|glossary|terms|privacy|careers?|jobs|press|blog|news|support|help|docs|contact|about|login|signin|signup|cart|account)(\/|$)/i;
 
 function categoryFromUrl(u: URL): string {
   const seg = u.pathname.split('/').filter(Boolean);
@@ -89,7 +98,8 @@ export async function tryWooCommerce(origin: string, fetcher: Fetcher): Promise<
 }
 
 // ---- JSON-LD ----
-const ITEM_TYPES = /^(Product|Service|Course|MenuItem|Offer|IndividualProduct|ProductModel|SoftwareApplication|Event|Physician|MedicalProcedure)$/i;
+const ITEM_TYPES =
+  /^(Product|Service|Course|MenuItem|Offer|IndividualProduct|ProductModel|SoftwareApplication|Event|Physician|MedicalProcedure)$/i;
 
 function walkLd(node: unknown, out: { name: string; url?: string; category?: string }[], depth = 0) {
   if (!node || depth > 7 || out.length > 80) return;
@@ -107,7 +117,6 @@ function walkLd(node: unknown, out: { name: string; url?: string; category?: str
       category: typeof o.category === 'string' ? cleanText(o.category) : undefined,
     });
   }
-  // OfferCatalog / hasOfferCatalog: catalog name is the category of its children
   if (types.includes('OfferCatalog') && Array.isArray(o.itemListElement)) {
     const catName = cleanText(o.name);
     for (const el of o.itemListElement) {
@@ -170,7 +179,7 @@ export async function extractSitemapItems(origin: string, fetcher: Fetcher): Pro
     let urls = grab(root.text);
     if (/<sitemapindex/i.test(root.text)) {
       const children = urls
-        .filter((u) => !/(post|blog|news|page|author|tag)/i.test(u) || /(product|service)/i.test(u))
+        .filter((u) => !/(post|blog|news|page|author|tag|city|location|area)/i.test(u) || /(product|service)/i.test(u))
         .slice(0, 4);
       const results = await Promise.allSettled(children.map((c) => fetcher(c, 'application/xml,text/xml,*/*')));
       urls = [];
@@ -185,9 +194,11 @@ export async function extractSitemapItems(origin: string, fetcher: Fetcher): Pro
   for (const raw of locs) {
     try {
       const u = new URL(raw);
-      if (u.origin !== origin || !SIGNAL_PATH.test(u.pathname.endsWith('/') ? u.pathname : u.pathname + '/')) continue;
+      if (u.origin !== origin) continue;
+      if (JUNK_PATH.test(u.pathname)) continue;
+      if (!SIGNAL_PATH.test(u.pathname.endsWith('/') ? u.pathname : u.pathname + '/')) continue;
       const segs = u.pathname.split('/').filter(Boolean);
-      if (segs.length < 2) continue; // skip bare section index pages
+      if (segs.length < 2) continue;
       const last = segs[segs.length - 1];
       const name = titleFromSlug(last);
       if (!goodName(name)) continue;
@@ -198,7 +209,7 @@ export async function extractSitemapItems(origin: string, fetcher: Fetcher): Pro
         category: categoryFromUrl(u),
         product_url: `${u.origin}${u.pathname}`,
       });
-      if (items.length >= 60) break;
+      if (items.length >= 40) break;
     } catch {
       /* skip */
     }
@@ -215,45 +226,59 @@ export function itemsFromLinksAndHeadings(
     for (const l of p.navAndServiceLinks) {
       const name = cleanText(l.text);
       if (!goodName(name) || /^see all|^explore |^view all/i.test(name)) continue;
+      let cat = '';
       try {
-        if (JUNK_PATH.test(new URL(l.url).pathname)) continue;
+        const parsed = new URL(l.url);
+        if (JUNK_PATH.test(parsed.pathname)) continue;
+        cat = categoryFromUrl(parsed);
       } catch {
         continue;
       }
-      let cat = '';
-      try {
-        cat = categoryFromUrl(new URL(l.url));
-      } catch {
-        /* ignore */
-      }
-      items.push({ item_id: '', item_slug: slugify(name, items.length + 1), item_name: name, category: cat, product_url: l.url });
+      items.push({
+        item_id: '',
+        item_slug: slugify(name, items.length + 1),
+        item_name: name,
+        category: cat,
+        product_url: l.url,
+      });
     }
-    // Subpage headings (skip homepage, whose headings are mostly marketing copy)
     if (idx > 0) {
-      for (const h of p.headings.slice(0, 12)) {
+      for (const h of p.headings.slice(0, 10)) {
         const name = cleanText(h);
-        if (!goodName(name) || name.split(' ').length > 9) continue;
-        items.push({ item_id: '', item_slug: slugify(name, items.length + 1), item_name: name, category: '', product_url: p.url });
+        if (!goodName(name)) continue;
+        items.push({
+          item_id: '',
+          item_slug: slugify(name, items.length + 1),
+          item_name: name,
+          category: '',
+          product_url: p.url,
+        });
       }
     }
   });
-  // Last resort: homepage headings (single-page sites)
   if (items.length === 0 && pages[0]) {
-    for (const h of pages[0].headings.slice(0, 15)) {
+    for (const h of pages[0].headings.slice(0, 12)) {
       const name = cleanText(h);
       if (!goodName(name)) continue;
-      items.push({ item_id: '', item_slug: slugify(name, items.length + 1), item_name: name, category: '', product_url: pages[0].url });
+      items.push({
+        item_id: '',
+        item_slug: slugify(name, items.length + 1),
+        item_name: name,
+        category: '',
+        product_url: pages[0].url,
+      });
     }
   }
   return items;
 }
 
 // ---- Merge ----
-export function mergeItems(groups: ScrapedItem[][], max = 30): ScrapedItem[] {
+export function mergeItems(groups: ScrapedItem[][], max = 24): ScrapedItem[] {
   const seen = new Set<string>();
   const out: ScrapedItem[] = [];
   for (const g of groups) {
     for (const it of g) {
+      if (!goodName(it.item_name)) continue;
       const key = it.item_slug || slugify(it.item_name, out.length);
       const nameKey = it.item_name.toLowerCase();
       if (seen.has(key) || seen.has(nameKey)) continue;

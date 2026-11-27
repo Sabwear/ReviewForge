@@ -39,7 +39,7 @@ export interface AIUsageMetrics {
 export interface AIUsageRecord extends AIUsageMetrics {
   id: string;
   timestamp: string;
-  operation: 'scan-website' | 'adapt-business';
+  operation: 'scan-website' | 'adapt-business' | 'detect-reviews' | 'rewrite-reviews';
   status: 'success' | 'error';
   errorMessage?: string;
 }

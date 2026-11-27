@@ -567,3 +567,116 @@ export const SCAN_WEBSITE_JSON_HINT = `{
     "extraTails": ["5-6 short follow-up sentences"]
   }]
 }`;
+
+export interface ReviewAuditInput {
+  id: string;
+  item_name: string;
+  category: string;
+  stars: number;
+  language: string;
+  subject: string;
+  body: string;
+}
+
+export interface ReviewAuditResult {
+  id: string;
+  humanScore: number; // 0-100 (higher = more human & domain-accurate)
+  verdict: 'human' | 'generic' | 'ai_flagged';
+  reason: string;
+}
+
+export async function detectReviewsWithAI(
+  payload: AIConfigPayload | undefined,
+  env: ServerAIEnv,
+  reviews: ReviewAuditInput[],
+  businessContext: string
+): Promise<{ results: ReviewAuditResult[]; usage: AIUsageMetrics }> {
+  const batch = reviews.slice(0, 35);
+  const formatted = batch
+    .map(
+      (r) =>
+        `ID="${r.id}" | Lang=${r.language} | Stars=${r.stars} | Offering="${r.item_name}" (${r.category}) | Title="${r.subject}" | Body="${r.body}"`
+    )
+    .join('\n');
+
+  const prompt = `Audit these generated customer reviews for authenticity, natural human phrasing, and business-domain accuracy.
+
+Business context: ${businessContext || '(Infer from offerings — pay close attention to whether this is a SERVICE business like plumbing/heating/clinic/agency vs an e-commerce store)'}
+
+Reviews to audit:
+${formatted}
+
+SCORING RULES (strict):
+- Give LOW humanScore (10–45, verdict="ai_flagged") if a review:
+  * Uses e-commerce/shipping/packaging/gift/item-swap phrasing ("bought", "shipping", "box", "packaging", "colis", "emballage", "cet article", "dit artikel", "cadeau") for a SERVICE business!
+  * Sounds robotic, overly polished, or uses AI clichés ("game-changer", "exceeded expectations", "thoughtful and sturdy").
+  * Reviews a city name or navigation label as if it were a product.
+- Give MEDIUM humanScore (50–74, verdict="generic") if it is grammatically fine but too vague/template-like and could apply to any business.
+- Give HIGH humanScore (75–98, verdict="human") if it sounds like a real human client/buyer with natural cadence and concrete, domain-accurate details.`;
+
+  const { data, usage } = await generateJsonWithAI<{ results?: ReviewAuditResult[] }>(payload, env, {
+    systemInstruction:
+      'You are a strict multilingual review authenticity detector and QA editor. Return concise, honest humanScore (0-100), verdict ("human" | "generic" | "ai_flagged"), and a crisp 6-14 word reason for every review ID.',
+    prompt,
+    jsonShapeHint: `{ "results": [{ "id": "exact-id", "humanScore": 85, "verdict": "human", "reason": "Natural tone with concrete service detail." }] }`,
+  });
+
+  const normalized: ReviewAuditResult[] = (data?.results || []).map((r) => {
+    const score = Math.max(0, Math.min(100, Math.round(Number(r.humanScore) || 50)));
+    const verdict: ReviewAuditResult['verdict'] =
+      score >= 75 ? 'human' : score >= 50 ? 'generic' : 'ai_flagged';
+    return {
+      id: String(r.id),
+      humanScore: score,
+      verdict,
+      reason: String(r.reason || '').slice(0, 140) || 'Evaluated by AI detector.',
+    };
+  });
+
+  return { results: normalized, usage };
+}
+
+export async function rewriteReviewsWithAI(
+  payload: AIConfigPayload | undefined,
+  env: ServerAIEnv,
+  reviews: ReviewAuditInput[],
+  businessContext: string
+): Promise<{ rewrites: Array<{ id: string; subject: string; body: string }>; usage: AIUsageMetrics }> {
+  const batch = reviews.slice(0, 20);
+  const formatted = batch
+    .map(
+      (r) =>
+        `ID="${r.id}" | Lang=${r.language} | Stars=${r.stars} | Offering="${r.item_name}" (${r.category}) | OldTitle="${r.subject}" | OldBody="${r.body}"`
+    )
+    .join('\n');
+
+  const prompt = `Rewrite these flagged customer reviews so they sound 100% like authentic, everyday human customers for this exact business.
+
+Business context: ${businessContext || '(Match the exact offerings — if plumbing/heating/repair/clinic/agency, write about booking an appointment, technician punctuality, diagnosis, clean work, fair quote — NEVER shipping/packaging/buying items!)'}
+
+Flagged reviews to rewrite (keep the EXACT same language and star rating for each ID):
+${formatted}
+
+RULES:
+- Write in the EXACT language code specified (e.g. nl = natural Belgian/Dutch, fr = natural French, en = natural English, darija_latin = Moroccan Darija in Latin script).
+- Vary sentence length naturally (some short 1-sentence, some 2-3 sentences, casual human rhythm, zero AI buzzwords).
+- Keep 1-2 star reviews benign & realistic (minor scheduling wait, slight preference mismatch — never scam/fraud allegations).`;
+
+  const { data, usage } = await generateJsonWithAI<{
+    rewrites?: Array<{ id: string; subject: string; body: string }>;
+  }>(payload, env, {
+    systemInstruction:
+      'You are an expert multilingual human-voice copywriter who rewrites generic or off-domain reviews into authentic, natural, domain-accurate customer reviews.',
+    prompt,
+    jsonShapeHint: `{ "rewrites": [{ "id": "exact-id", "subject": "Short natural title", "body": "Authentic human review body" }] }`,
+  });
+
+  return {
+    rewrites: (data?.rewrites || []).map((r) => ({
+      id: String(r.id),
+      subject: String(r.subject || '').trim(),
+      body: String(r.body || '').trim(),
+    })),
+    usage,
+  };
+}

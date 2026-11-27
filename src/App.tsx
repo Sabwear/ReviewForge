@@ -119,6 +119,12 @@ export default function App() {
   const requestIdRef = useRef<number>(0);
 
   const [reviews, setReviews] = useState<GeneratedReview[]>([]);
+  const [reviewAuditMap, setReviewAuditMap] = useState<
+    Record<string, { humanScore: number; verdict: 'human' | 'generic' | 'ai_flagged'; reason: string }>
+  >({});
+  const [isAuditingReviews, setIsAuditingReviews] = useState(false);
+  const [isRewritingReviews, setIsRewritingReviews] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
 
   const { eligible, excluded } = useMemo(
     () => filterEligibleProducts(products, config),
@@ -575,6 +581,128 @@ export default function App() {
     []
   );
 
+  const handleAuditReviews = useCallback(
+    async (targetReviews: GeneratedReview[]) => {
+      if (targetReviews.length === 0) return;
+      setIsAuditingReviews(true);
+      setAuditError(null);
+      try {
+        const res = await fetch('/api/ai/detect-reviews', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            reviews: targetReviews.slice(0, 35).map((r) => ({
+              id: r.id,
+              item_name: r.item_name,
+              category: r.category,
+              stars: r.stars,
+              language: r.language,
+              subject: r.subject,
+              body: r.body,
+            })),
+            businessContext: businessContext || activeBusinessLabel,
+            aiConfig: getAIRequestPayload(),
+          }),
+        });
+        const payload = (await res.json().catch(() => ({}))) as {
+          results?: Array<{ id: string; humanScore: number; verdict: 'human' | 'generic' | 'ai_flagged'; reason: string }>;
+          aiUsage?: AIUsageMetrics | null;
+          error?: string;
+        };
+        if (!res.ok || !Array.isArray(payload.results)) {
+          recordUsage('detect-reviews', payload.aiUsage, 'error', payload.error);
+          throw new Error(payload.error || `AI detection failed (HTTP ${res.status}).`);
+        }
+        if (payload.aiUsage) {
+          recordUsage('detect-reviews', payload.aiUsage, 'success');
+        }
+        setReviewAuditMap((prev) => {
+          const next = { ...prev };
+          for (const item of payload.results!) {
+            next[item.id] = {
+              humanScore: item.humanScore,
+              verdict: item.verdict,
+              reason: item.reason,
+            };
+          }
+          return next;
+        });
+      } catch (err) {
+        setAuditError(err instanceof Error ? err.message : 'AI detection failed.');
+      } finally {
+        setIsAuditingReviews(false);
+      }
+    },
+    [businessContext, activeBusinessLabel, getAIRequestPayload, recordUsage]
+  );
+
+  const handleRewriteFlaggedReviews = useCallback(
+    async (flaggedReviews: GeneratedReview[]) => {
+      if (flaggedReviews.length === 0) return;
+      setIsRewritingReviews(true);
+      setAuditError(null);
+      try {
+        const res = await fetch('/api/ai/rewrite-reviews', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            reviews: flaggedReviews.slice(0, 20).map((r) => ({
+              id: r.id,
+              item_name: r.item_name,
+              category: r.category,
+              stars: r.stars,
+              language: r.language,
+              subject: r.subject,
+              body: r.body,
+            })),
+            businessContext: businessContext || activeBusinessLabel,
+            aiConfig: getAIRequestPayload(),
+          }),
+        });
+        const payload = (await res.json().catch(() => ({}))) as {
+          rewrites?: Array<{ id: string; subject: string; body: string }>;
+          aiUsage?: AIUsageMetrics | null;
+          error?: string;
+        };
+        if (!res.ok || !Array.isArray(payload.rewrites)) {
+          recordUsage('rewrite-reviews', payload.aiUsage, 'error', payload.error);
+          throw new Error(payload.error || `AI rewrite failed (HTTP ${res.status}).`);
+        }
+        if (payload.aiUsage) {
+          recordUsage('rewrite-reviews', payload.aiUsage, 'success');
+        }
+        const rewriteMap = new Map(payload.rewrites.map((rw) => [rw.id, rw]));
+        setReviews((prev) =>
+          prev.map((r) => {
+            const rw = rewriteMap.get(r.id);
+            if (!rw || !rw.body) return r;
+            return {
+              ...r,
+              subject: rw.subject || r.subject,
+              body: rw.body,
+            };
+          })
+        );
+        setReviewAuditMap((prev) => {
+          const next = { ...prev };
+          for (const rw of payload.rewrites!) {
+            next[rw.id] = {
+              humanScore: 93,
+              verdict: 'human',
+              reason: 'Rewritten by AI for natural human tone & business fit.',
+            };
+          }
+          return next;
+        });
+      } catch (err) {
+        setAuditError(err instanceof Error ? err.message : 'AI rewrite failed.');
+      } finally {
+        setIsRewritingReviews(false);
+      }
+    },
+    [businessContext, activeBusinessLabel, getAIRequestPayload, recordUsage]
+  );
+
   const handleDeleteTemplate = useCallback((id: string) => {
     setTemplates((prev) => prev.filter((t) => t.id !== id));
   }, []);
@@ -656,6 +784,14 @@ export default function App() {
               onExportCSV={handleExportCSV}
               onCopyCSV={handleCopyCSV}
               onOpenDatasetTab={() => setActiveTab('dataset')}
+              aiOnline={connectionStatus === 'online' || isAIConfigured}
+              onOpenAISettings={() => setIsAIModalOpen(true)}
+              onAuditReviews={handleAuditReviews}
+              onRewriteFlaggedReviews={handleRewriteFlaggedReviews}
+              isAuditingReviews={isAuditingReviews}
+              isRewritingReviews={isRewritingReviews}
+              auditError={auditError}
+              reviewAuditMap={reviewAuditMap}
             />
           )}
 

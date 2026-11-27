@@ -292,7 +292,7 @@ export function useAISettings() {
 
   const recordUsage = useCallback(
     (
-      operation: 'scan-website' | 'adapt-business',
+      operation: 'scan-website' | 'adapt-business' | 'detect-reviews' | 'rewrite-reviews',
       metrics: AIUsageMetrics | null | undefined,
       status: 'success' | 'error' = 'success',
       errorMessage?: string

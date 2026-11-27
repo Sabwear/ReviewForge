@@ -6,15 +6,18 @@ import net from 'net';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
+  detectReviewsWithAI,
   generateJsonWithAI,
   getFallbackInfo,
   isFallbackSecretValid,
   listProviderModels,
   resolveAIConfig,
+  rewriteReviewsWithAI,
   SCAN_WEBSITE_JSON_HINT,
   VOICE_PACK_JSON_HINT,
   type AIConfigPayload,
   type AIUsageMetrics,
+  type ReviewAuditInput,
   type ServerAIEnv,
 } from './ai-core.ts';
 import {
@@ -739,6 +742,68 @@ app.post('/api/ai/verify-secret', (req, res) => {
   res.json({ valid: true, configured: true, provider: fb.provider, defaultModel: fb.defaultModel });
 });
 
+app.post('/api/ai/detect-reviews', async (req, res) => {
+  try {
+    const body = req.body as {
+      reviews?: ReviewAuditInput[];
+      businessContext?: string;
+      aiConfig?: AIConfigPayload;
+    };
+    const reviews = Array.isArray(body?.reviews) ? body.reviews : [];
+    if (reviews.length === 0) {
+      res.status(400).json({ error: 'No reviews to audit.' });
+      return;
+    }
+    const env = getServerAIEnv();
+    if (!resolveAIConfig(body?.aiConfig, env)) {
+      res.status(403).json({
+        error: 'Connect an AI provider (or unlock Fallback AI) to run the AI Authenticity Detector.',
+      });
+      return;
+    }
+    const { results, usage } = await detectReviewsWithAI(
+      body?.aiConfig,
+      env,
+      reviews,
+      typeof body?.businessContext === 'string' ? body.businessContext.slice(0, 400) : ''
+    );
+    res.json({ results, aiUsage: usage });
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'AI detection failed.' });
+  }
+});
+
+app.post('/api/ai/rewrite-reviews', async (req, res) => {
+  try {
+    const body = req.body as {
+      reviews?: ReviewAuditInput[];
+      businessContext?: string;
+      aiConfig?: AIConfigPayload;
+    };
+    const reviews = Array.isArray(body?.reviews) ? body.reviews : [];
+    if (reviews.length === 0) {
+      res.status(400).json({ error: 'No flagged reviews to rewrite.' });
+      return;
+    }
+    const env = getServerAIEnv();
+    if (!resolveAIConfig(body?.aiConfig, env)) {
+      res.status(403).json({
+        error: 'Connect an AI provider (or unlock Fallback AI) to rewrite flagged reviews.',
+      });
+      return;
+    }
+    const { rewrites, usage } = await rewriteReviewsWithAI(
+      body?.aiConfig,
+      env,
+      reviews,
+      typeof body?.businessContext === 'string' ? body.businessContext.slice(0, 400) : ''
+    );
+    res.json({ rewrites, aiUsage: usage });
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'AI rewrite failed.' });
+  }
+});
+
 // ---------- API Route 1: Adapt Uploaded Product CSV ----------
 
 app.post('/api/adapt-business', async (req, res) => {
@@ -985,14 +1050,14 @@ Target languages to generate review packs for: ${languages.join(', ')}
 
 CRITICAL INSTRUCTIONS:
 1. Business Type & Offerings:
-   - Determine whether this website is a "service" business (agency, clinic, salon, restaurant, hotel, consultancy, SaaS, home services, repair shop, coaching, etc.) or an "ecommerce" store.
+   - Determine whether this website is a "service" business (plumber, HVAC/boiler technician, agency, clinic, salon, restaurant, hotel, consultancy, SaaS, home services, repair shop, coaching, etc.) or an "ecommerce" store.
    - ${
      shopifyProducts.length > 0
        ? 'Use the exact Shopify products listed above (keeping their exact item_slug and product_url) and group them into 2–6 clean categories.'
-       : 'Extract 6 to 18 concrete, REAL services, packages, plans, treatments, or products actually offered by this website (do NOT invent unrelated services). Give each a clean item_name, lowercase item_slug, logical category (2–5 categories total), and the best matching product_url on that domain.'
+       : 'Extract 6 to 15 concrete, REAL services, packages, plans, treatments, or products actually offered by this website. NEVER include city/location names (e.g. Brussel, Gent), generic navigation pages ("Our services", "Service areas", "About us"), or marketing slogans as items! Give each a clean item_name, lowercase item_slug, logical category (2–4 categories total), and the best matching product_url on that domain.'
    }
 2. Service vs Product Voice:
-   - If this is a SERVICE business, reviews MUST sound like real clients reviewing those services (e.g., consultation, team communication, turnaround time, results, booking experience, quality of work, ongoing support) — NEVER say "packaging", "shipping box", or "arrived in the mail" for a service business!
+   - If this is a SERVICE business, reviews MUST sound like real clients reviewing an on-site or professional service (booking, technician punctuality, diagnosis, clean workmanship, transparent quote, problem solved) — STRICTLY FORBIDDEN words: "bought", "ordered", "packaging", "shipping", "box", "colis", "emballage", "cet article", "dit artikel", "cadeau", "listing photos", or "swap variant"!
    - If this is an E-COMMERCE store, reviews should match the actual products (features, build quality, delivery, unboxing, daily use).
 3. Category-Specific Context: For EACH category you created and EACH target language (${languages.join(', ')}), generate a categoryContext entry with realistic, category-specific scenarios (contextA), concrete service/product qualities (contextB), and category-specific openers & middles.
 4. Store/Business-Level Language Packs: For EACH target language (${languages.join(', ')}), generate a full languagePack covering stars 5, 4, 3, 2, and 1. Every sentence in openers, middles, closers, and extraTails MUST be grammatically self-contained. Every value in tokens.timeframe must work smoothly after "in" (EN), "en" (FR/ES), "f" (Darija), or "خلال" (AR).
