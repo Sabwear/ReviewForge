@@ -33,6 +33,7 @@ export function TopBar({
   const navItems: { id: ActiveTab; label: string }[] = [
     { id: 'workbench', label: 'Workbench' },
     { id: 'dashboard', label: 'Dashboard' },
+    { id: 'detector', label: 'AI Detector' },
     { id: 'dataset', label: 'Export Preview' },
     { id: 'library', label: 'Review Library' },
   ];

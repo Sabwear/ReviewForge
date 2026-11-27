@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AIDetectorView, AuditRunSummary, ReviewAuditEntry } from './components/AIDetectorView';
 import { ConfigSidebar } from './components/ConfigSidebar';
 import { DashboardView } from './components/DashboardView';
 import { DatasetTableView } from './components/DatasetTableView';
@@ -35,6 +36,30 @@ import {
   generateSingleReviewForProduct,
   normalizeReviewBody,
 } from './utils/generator';
+
+const AUDIT_MAP_STORAGE_KEY = 'reviewforge-ai-audit-map-v1';
+const AUDIT_RUNS_STORAGE_KEY = 'reviewforge-ai-audit-runs-v1';
+
+function loadSavedAuditMap(): Record<string, ReviewAuditEntry> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(AUDIT_MAP_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, ReviewAuditEntry>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function loadSavedAuditRuns(): AuditRunSummary[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(AUDIT_RUNS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 function getDefaultDateWindow(): { start: string; end: string } {
   const end = new Date();
@@ -119,12 +144,27 @@ export default function App() {
   const requestIdRef = useRef<number>(0);
 
   const [reviews, setReviews] = useState<GeneratedReview[]>([]);
-  const [reviewAuditMap, setReviewAuditMap] = useState<
-    Record<string, { humanScore: number; verdict: 'human' | 'generic' | 'ai_flagged'; reason: string }>
-  >({});
+  const [reviewAuditMap, setReviewAuditMap] = useState<Record<string, ReviewAuditEntry>>(loadSavedAuditMap);
+  const [auditRuns, setAuditRuns] = useState<AuditRunSummary[]>(loadSavedAuditRuns);
   const [isAuditingReviews, setIsAuditingReviews] = useState(false);
   const [isRewritingReviews, setIsRewritingReviews] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(AUDIT_MAP_STORAGE_KEY, JSON.stringify(reviewAuditMap));
+    } catch {
+      // ignore storage errors
+    }
+  }, [reviewAuditMap]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(AUDIT_RUNS_STORAGE_KEY, JSON.stringify(auditRuns));
+    } catch {
+      // ignore storage errors
+    }
+  }, [auditRuns]);
 
   const { eligible, excluded } = useMemo(
     () => filterEligibleProducts(products, config),
@@ -616,6 +656,7 @@ export default function App() {
         if (payload.aiUsage) {
           recordUsage('detect-reviews', payload.aiUsage, 'success');
         }
+        const nowIso = new Date().toISOString();
         setReviewAuditMap((prev) => {
           const next = { ...prev };
           for (const item of payload.results!) {
@@ -623,10 +664,29 @@ export default function App() {
               humanScore: item.humanScore,
               verdict: item.verdict,
               reason: item.reason,
+              auditedAt: nowIso,
             };
           }
           return next;
         });
+        const checkedCount = payload.results.length;
+        const avgHumanScore =
+          checkedCount > 0
+            ? Math.round(payload.results.reduce((s, x) => s + x.humanScore, 0) / checkedCount)
+            : 0;
+        const flaggedCount = payload.results.filter((x) => x.verdict !== 'human').length;
+        setAuditRuns((prev) =>
+          [
+            {
+              id: `${Date.now()}`,
+              timestamp: nowIso,
+              checkedCount,
+              avgHumanScore,
+              flaggedCount,
+            },
+            ...prev,
+          ].slice(0, 50)
+        );
       } catch (err) {
         setAuditError(err instanceof Error ? err.message : 'AI detection failed.');
       } finally {
@@ -702,6 +762,51 @@ export default function App() {
     },
     [businessContext, activeBusinessLabel, getAIRequestPayload, recordUsage]
   );
+
+  const handleClearAuditData = useCallback(() => {
+    setReviewAuditMap({});
+    setAuditRuns([]);
+    setAuditError(null);
+    try {
+      window.localStorage.removeItem(AUDIT_MAP_STORAGE_KEY);
+      window.localStorage.removeItem(AUDIT_RUNS_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleDeleteFlaggedReviews = useCallback((ids: string[]) => {
+    const idSet = new Set(ids);
+    setReviews((prev) => prev.filter((r) => !idSet.has(r.id)));
+    setReviewAuditMap((prev) => {
+      const next = { ...prev };
+      for (const id of ids) delete next[id];
+      return next;
+    });
+  }, []);
+
+  const handleExportHumanOnly = useCallback(() => {
+    const cleanReviews = reviews.filter((r) => reviewAuditMap[r.id]?.verdict === 'human');
+    if (cleanReviews.length === 0) return;
+    const formatMeta =
+      EXPORT_FORMAT_OPTIONS.find((f) => f.id === config.exportFormat) ??
+      EXPORT_FORMAT_OPTIONS[0];
+    const content = serializeReviewsByFormat(
+      cleanReviews,
+      config.exportFormat,
+      config.storeBaseUrl,
+      activeBusinessLabel
+    );
+    const slug = activeBusinessLabel
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    downloadExportFile(
+      content,
+      `${slug || 'reviews'}_human_verified_${cleanReviews.length}_rows.${formatMeta.extension}`,
+      formatMeta.mimeType
+    );
+  }, [reviews, reviewAuditMap, config.exportFormat, config.storeBaseUrl, activeBusinessLabel]);
 
   const handleDeleteTemplate = useCallback((id: string) => {
     setTemplates((prev) => prev.filter((t) => t.id !== id));
@@ -809,6 +914,29 @@ export default function App() {
               aiConnectionStatus={connectionStatus}
               onOpenAISettings={() => setIsAIModalOpen(true)}
               onClearAIUsage={clearUsageHistory}
+            />
+          )}
+
+          {activeTab === 'detector' && (
+            <AIDetectorView
+              reviews={reviews}
+              reviewAuditMap={reviewAuditMap}
+              auditRuns={auditRuns}
+              activeBusinessLabel={activeBusinessLabel}
+              aiConnectionStatus={connectionStatus}
+              aiOnline={connectionStatus === 'online' || isAIConfigured}
+              isAuditing={isAuditingReviews}
+              isRewriting={isRewritingReviews}
+              auditError={auditError}
+              onOpenAISettings={() => setIsAIModalOpen(true)}
+              onOpenWorkbench={() => setActiveTab('workbench')}
+              onAuditReviews={handleAuditReviews}
+              onRewriteFlagged={handleRewriteFlaggedReviews}
+              onRegenerateReview={handleRegenerateReview}
+              onDeleteReview={handleDeleteReview}
+              onDeleteFlaggedReviews={handleDeleteFlaggedReviews}
+              onClearAuditData={handleClearAuditData}
+              onExportHumanOnly={handleExportHumanOnly}
             />
           )}
 
