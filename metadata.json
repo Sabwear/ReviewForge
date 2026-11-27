@@ -1,0 +1,6 @@
+{
+  "name": "ReviewForge",
+  "description": "IPTV product review CSV generator with category targeting, star rating calibration, and authentic conversion-grade testimonials.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
