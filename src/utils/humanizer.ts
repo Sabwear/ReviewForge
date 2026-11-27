@@ -364,8 +364,13 @@ function getServiceStoryBank(
   language: ReviewLanguage
 ): ServiceStoryParts {
   const haystack = `${product.item_name} ${product.item_slug} ${product.category}`.toLowerCase();
-  const isBoiler = /boiler|heat|chauffage|verwarming|ketel|warm|hot water|bulex|vaillant|radiator|thermostat/i.test(haystack);
+  const isBoiler = /boiler|heat|chauffage|verwarming|ketel|warm|hot water|bulex|vaillant|radiator|thermostat|hvac/i.test(haystack);
   const isLeak = /leak|lek|fuite|plumb|plombier|loodgieter|pipe|drain|sink|toilet|tap|faucet|water/i.test(haystack);
+  const isElectric = /electr|wiring|panel|breaker|outlet|lighting|stroom/i.test(haystack);
+  const isCleaning = /clean|nettoyage|schoonmaak|maid|housekeep|carpet|window/i.test(haystack);
+  const isClinic = /dental|dentist|clinic|doctor|medical|physio|therapy|osteopath|skin|derma/i.test(haystack);
+  const isAgency = /web|seo|design|marketing|agency|audit|consult|dev|software|brand|ads|social/i.test(haystack);
+  const name = product.item_name;
 
   if (language === 'fr') {
     return {
@@ -381,9 +386,19 @@ function getServiceStoryBank(
             'Un tuyau derrière les toilettes gouttait sans arrêt depuis deux jours.',
             'La pression d’eau avait chuté brusquement dans toute la salle de bain.',
           ]
+        : isAgency
+        ? [
+            `On cherchait un vrai partenaire pour nous aider sur ${name} après plusieurs essais peu concluants.`,
+            `Notre besoin sur ${name} traînait depuis des mois faute de méthode claire.`,
+          ]
+        : isClinic
+        ? [
+            `J’appréhendais un peu mon rendez-vous pour ${name} après une mauvaise expérience ailleurs.`,
+            `J’avais besoin d’un suivi sérieux pour ${name} sans attendre des semaines.`,
+          ]
         : [
-            `On avait un souci urgent qui nécessitait une intervention pour ${product.item_name}.`,
-            `Le problème durait depuis plusieurs jours avant qu’on appelle pour ${product.item_name}.`,
+            `On avait besoin d’une vraie solution pour ${name} et on ne savait pas par où commencer.`,
+            `Le souci lié à ${name} durait depuis plusieurs jours avant qu’on les contacte.`,
           ],
       action: isBoiler
         ? [
@@ -395,28 +410,52 @@ function getServiceStoryBank(
             'Le plombier a trouvé le joint fissuré sans casser le coffrage et a refait le raccord proprement.',
             'Il a remplacé la pièce défectueuse et vérifié l’étanchéité sous pression pendant dix minutes.',
           ]
+        : isElectric
+        ? [
+            'L’électricien a identifié le circuit en défaut au tableau, remplacé le disjoncteur et tout testé en sécurité.',
+          ]
+        : isCleaning
+        ? [
+            'L’équipe a pris le temps de traiter chaque recoin demandé, sans rien bâcler.',
+          ]
+        : isClinic
+        ? [
+            `Le praticien a pris le temps d’expliquer chaque étape de ${name} avec beaucoup de douceur.`,
+          ]
+        : isAgency
+        ? [
+            `Ils ont d’abord analysé notre situation sur ${name}, proposé un plan concret et livré exactement ce qui était prévu.`,
+          ]
         : [
-            'Le technicien a fait un diagnostic complet avant d’intervenir et a réglé le souci sur place avec les pièces de son camion.',
-            'Il a tout vérifié étape par étape et nous a expliqué exactement ce qui posait problème.',
+            `Ils ont bien évalué notre besoin pour ${name}, expliqué les étapes clairement et réalisé le travail avec soin.`,
+            `L’intervention sur ${name} a été menée de manière précise, sans rien laisser au hasard.`,
           ],
       appointment: [
-        'Il a appelé 15 minutes avant d’arriver et nous a montré le devis clair avant de commencer.',
-        'Rendez-vous pris rapidement, arrivé pile dans le créneau annoncé avec tout le matériel.',
-        'Prise de rdv simple par téléphone et passage le jour même comme promis.',
+        'Ils ont prévenu avant le rendez-vous et confirmé le tarif clairement avant de démarrer.',
+        'Rendez-vous pris facilement et horaire respecté à la minute près.',
+        'Prise de contact simple et créneau obtenu rapidement comme promis.',
       ],
-      resolution: [
-        'Depuis son passage, tout tourne sans le moindre souci.',
-        'Problème réglé dès la première visite, plus aucune panne depuis trois semaines.',
-        'Tout refonctionne normalement et la pression reste parfaitement stable.',
-      ],
-      observation: [
-        'J’ai vraiment apprécié qu’il protège le sol et prenne 5 minutes pour me montrer comment surveiller la pression.',
-        'Pas de vente forcée, juste des conseils honnêtes et un chantier laissé nickel.',
-        'Rare de tomber sur quelqu’un d’aussi calme et pédagogue.',
-      ],
+      resolution: isBoiler || isLeak
+        ? [
+            'Depuis son passage, tout fonctionne sans le moindre souci.',
+            'Problème réglé dès la première visite, plus aucune panne depuis trois semaines.',
+          ]
+        : [
+            `Le résultat sur ${name} correspond exactement à ce qu’on attendait.`,
+            `Tout a été réglé proprement dès la première fois, vrai soulagement.`,
+          ],
+      observation: isBoiler || isLeak
+        ? [
+            'J’ai vraiment apprécié qu’il protège le sol et prenne 5 minutes pour expliquer comment tout surveiller.',
+            'Pas de vente forcée, juste des conseils honnêtes et un travail laissé nickel.',
+          ]
+        : [
+            'Aucune pression commerciale, juste des conseils honnêtes et un vrai sens du détail.',
+            'Rare de tomber sur une équipe aussi à l’écoute et transparente.',
+          ],
       companyMentions: [
-        'C’était notre première fois avec {company} et on garde clairement leur numéro.',
-        'Je comprends pourquoi nos voisins nous ont conseillé {company}.',
+        'C’était notre première fois avec {company} et on garde clairement leur contact.',
+        'Je comprends pourquoi on nous a recommandé {company}.',
         'Franchement, l’équipe de {company} fait la différence par son sérieux.',
       ],
     };
@@ -437,8 +476,8 @@ function getServiceStoryBank(
             'De waterdruk viel ineens weg in de badkamer.',
           ]
         : [
-            `We zaten met een dringend probleem waarvoor we ${product.item_name} nodig hadden.`,
-            `Na dagen twijfelen toch gebeld voor ${product.item_name}.`,
+            `We hadden een concrete oplossing nodig voor ${name} en wilden iemand die het meteen goed aanpakt.`,
+            `Na lang uitstellen toch contact opgenomen voor ${name}.`,
           ],
       action: isBoiler
         ? [
@@ -450,28 +489,40 @@ function getServiceStoryBank(
             'De loodgieter vond de lekkende koppeling zonder breekwerk en plaatste meteen een nieuwe dichting.',
             'Hij verving het stuk leiding en testte alle kranen op volle druk voor hij vertrok.',
           ]
+        : isCleaning
+        ? [
+            `Het team werkte ${name} grondig en netjes af tot in de kleinste details.`,
+          ]
         : [
-            'De vakman stelde meteen een heldere diagnose en loste het ter plaatse op met onderdelen uit zijn bestelwagen.',
-            'Alles werd stap voor stap nagekeken en netjes hersteld.',
+            `Ze bekeken onze situatie voor ${name} heel zorgvuldig, legden alles duidelijk uit en voerden het werk vakkundig uit.`,
+            `Stap voor stap aangepakt voor ${name} zonder onnodige omwegen.`,
           ],
       appointment: [
-        'Hij belde een kwartier vooraf en gaf eerst een duidelijke prijsopgave voor hij begon.',
-        'De afspraak lag snel vast en hij stond stipt binnen het afgesproken tijdslot voor de deur.',
-        'Vlot contact aan de telefoon en dezelfde dag nog iemand langsgekomen.',
+        'Netjes vooraf laten weten hoe laat ze kwamen en eerst een heldere prijsafspraak gemaakt.',
+        'De afspraak lag snel vast en ze waren stipt binnen het afgesproken tijdslot.',
+        'Vlot contact en snel geholpen zoals beloofd.',
       ],
-      resolution: [
-        'Sinds het bezoek werkt alles weer foutloos zonder één storing.',
-        'Direct opgelost bij de eerste interventie, nu al drie weken geen probleem meer.',
-        'Geen druppel meer gezien en alles draait weer rustig.',
-      ],
-      observation: [
-        'Heel fijn dat hij alles netjes opruimde en me even uitlegde hoe ik zelf de druk kan controleren.',
-        'Geen opdringerige extra kosten, gewoon eerlijk vakwerk.',
-        'Rustige en beleefde monteur die duidelijk weet waar hij mee bezig is.',
-      ],
+      resolution: isBoiler || isLeak
+        ? [
+            'Sinds het bezoek werkt alles weer foutloos zonder één storing.',
+            'Direct opgelost bij de eerste interventie, nu al drie weken geen probleem meer.',
+          ]
+        : [
+            `Het resultaat voor ${name} is precies zoals we hoopten.`,
+            'Meteen goed opgelost bij de eerste keer, echt een opluchting.',
+          ],
+      observation: isBoiler || isLeak
+        ? [
+            'Heel fijn dat alles netjes werd opgeruimd en ik duidelijke uitleg kreeg voor later.',
+            'Geen opdringerige extra kosten, gewoon eerlijk vakwerk.',
+          ]
+        : [
+            'Geen opdringerige verkoop, gewoon eerlijk advies en verzorgd werk.',
+            'Vriendelijke aanpak en je merkt meteen dat ze hun vak kennen.',
+          ],
       companyMentions: [
-        'Eerste keer dat we {company} belden en hun nummer staat nu vast in mijn telefoon.',
-        'Blij dat we op aanraden van de buren voor {company} hebben gekozen.',
+        'Eerste keer dat we {company} inschakelden en hun nummer staat nu vast in mijn telefoon.',
+        'Blij dat we op aanraden van kennissen voor {company} hebben gekozen.',
         'De service van {company} stak er echt bovenuit vergeleken met eerdere ervaringen.',
       ],
     };
@@ -491,43 +542,83 @@ function getServiceStoryBank(
           'The pipe behind our upstairs toilet was dripping nonstop and we could not tighten it ourselves.',
           'Water pressure dropped across the house and we spotted dampness near the main shutoff.',
         ]
+      : isElectric
+      ? [
+          'One of our main circuits kept tripping every evening whenever two appliances ran together.',
+        ]
+      : isCleaning
+      ? [
+          `We needed a thorough ${name} before moving in and didn’t have the time to tackle it ourselves.`,
+        ]
+      : isClinic
+      ? [
+          `I had been putting off booking ${name} because I’m usually nervous about appointments.`,
+        ]
+      : isAgency
+      ? [
+          `We had been struggling with ${name} for months and needed a team that actually delivered results.`,
+        ]
       : [
-          `We ran into a sudden issue at home and needed ${product.item_name} sorted quickly.`,
-          `Had been putting off ${product.item_name} for weeks until it finally needed proper attention.`,
+          `We needed reliable help with ${name} and wanted it handled properly the first time.`,
+          `Had been putting off ${name} for weeks until we finally decided to get it sorted.`,
         ],
     action: isBoiler
       ? [
           'The technician checked the expansion vessel, swapped out a worn valve, and bled the radiators in under an hour.',
-          'He diagnosed a faulty pressure sensor right away, had the spare part in his van, and tested both heating and hot water.',
+          'He diagnosed a faulty pressure sensor right away, replaced it on the spot, and tested both heating and hot water.',
         ]
       : isLeak
       ? [
           'The plumber traced the cracked fitting without cutting into the cabinetry and replaced the joint cleanly.',
           'He swapped the worn seal, tightened the supply line, and ran every tap to verify zero drips.',
         ]
+      : isElectric
+      ? [
+          'The electrician tested the breaker panel, replaced the faulty circuit, and labeled everything clearly.',
+        ]
+      : isCleaning
+      ? [
+          'They worked through every room methodically and paid extra attention to the kitchen and bathroom details.',
+        ]
+      : isClinic
+      ? [
+          `The specialist explained every step of ${name} calmly beforehand and checked in throughout the visit.`,
+        ]
+      : isAgency
+      ? [
+          `They audited our setup for ${name}, laid out clear priorities, and shipped the improvements right on schedule.`,
+        ]
       : [
-          'The technician diagnosed the root cause in ten minutes and fixed it on the spot with parts from his van.',
-          'He walked through the issue step by step, made the repair cleanly, and double-checked everything.',
+          `They assessed what we needed for ${name}, walked us through the plan clearly, and completed the work carefully.`,
+          `Handled ${name} step by step with real attention to detail and double-checked everything at the end.`,
         ],
     appointment: [
-      'He texted 15 minutes before arriving and walked me through the exact quote before touching anything.',
-      'Booking was straightforward and he showed up right inside the morning window with shoe covers.',
-      'Got a same-day slot over the phone and the arrival time was spot on.',
+      'They messaged ahead of the appointment and walked me through the exact quote before starting.',
+      'Booking was straightforward and they were right on time inside the promised window.',
+      'Got a convenient slot quickly and communication stayed clear from start to finish.',
     ],
-    resolution: [
-      'Everything has been running smoothly for three weeks now with zero issues.',
-      'Problem completely solved on the first visit — huge relief.',
-      'Not a single hiccup since he left, pressure and temperature are back to normal.',
-    ],
-    observation: [
-      'Really appreciated that he wiped down the floor and showed me how to check the gauge myself.',
-      'No pushy upselling at all, just honest advice and tidy workmanship.',
-      'You rarely meet a tradesperson this patient when answering questions.',
-    ],
+    resolution: isBoiler || isLeak
+      ? [
+          'Everything has been running smoothly for three weeks now with zero issues.',
+          'Problem completely solved on the first visit — huge relief.',
+        ]
+      : [
+          `The outcome for ${name} is exactly what we needed.`,
+          'Everything was sorted out cleanly on the first go — huge relief.',
+        ],
+    observation: isBoiler || isLeak
+      ? [
+          'Really appreciated that he left the area spotless and showed me what to keep an eye on.',
+          'No pushy upselling at all, just honest advice and tidy workmanship.',
+        ]
+      : [
+          'No pushy upselling at all, just honest advice and genuinely thoughtful service.',
+          'You rarely meet a team this patient when answering questions.',
+        ],
     companyMentions: [
-      'First time using {company} and I already saved their number for next year’s checkup.',
-      'Now I see why our neighbors keep recommending {company}.',
-      'Honestly, {company} handled this way better than the last contractor we tried.',
+      'First time using {company} and I already saved their details for next time.',
+      'Now I see why people around here keep recommending {company}.',
+      'Honestly, {company} handled this way better than the last place we tried.',
     ],
   };
 }
