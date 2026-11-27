@@ -1,6 +1,6 @@
-// Keyless website scraper: extracts services/products from a site without any AI API.
-// Sources (in priority order): WooCommerce Store API, JSON-LD structured data,
-// sitemap.xml URLs, high-signal internal links, and subpage headings.
+// Keyless website scraper: extracts ONLY real services/products from any website without AI.
+// Strict anti-heading & anti-CTA guards ensure website slogans, process steps, navigation hubs,
+// calls to action, and city/service-area pages are NEVER treated as offerings.
 
 export interface ScrapedItem {
   item_id: string;
@@ -16,18 +16,27 @@ type Fetcher = (
 ) => Promise<{ finalUrl: URL; status: number; contentType: string; text: string }>;
 
 const SIGNAL_PATH =
-  /\/(services?|solutions?|offerings?|pricing|plans?|packages?|treatments?|menu|products?|collections?|shop|store|catalog|features?|programs?|courses?|prestations?|produits?|tarifs?|soins?|diensten|interventions?|depannage|reparations?)\//i;
+  /\/(services?|solutions?|offerings?|pricing|plans?|packages?|treatments?|menu|products?|collections?|shop|store|catalog|programs?|courses?|prestations?|produits?|tarifs?|soins?|diensten|oplossingen|interventions?|depannage|reparations?)\//i;
 
 const JUNK_PATH =
-  /\/(legal|customers?|glossary|terms|privacy|careers?|jobs|press|blog|news|support|help|docs|contact|about|over-ons|a-propos|login|signin|signup|cart|account|service-areas?|areas?|locations?|cities|werkgebied|zones?|regio|steden|faq|reviews?|testimonials?|partners?|author|tag|category|videos?|downloads?|financing|brochures?|manuals?|gallery|resources?)(\/|$)/i;
+  /\/(legal|customers?|glossary|terms|privacy|cookies?|careers?|jobs|press|blog|advice|conseils?|advies|news|articles?|support|help|docs|contact|about|over-ons|a-propos|qui-sommes-nous|login|signin|signup|cart|checkout|account|service-areas?|areas?|locations?|cities|werkgebied|zones?|regio|steden|communes?|gemeenten|faq|faqs|reviews?|testimonials?|avis|klantenservice|partners?|author|tag|category|videos?|downloads?|financing|brochures?|manuals?|gallery|resources?|book|booking|appointment|quote|offerte|demande-offerte|devis|book-a-technician)(\/|$)/i;
+
+// Hub index paths like /services, /en/services, /solutions, /diensten (depth 1 after optional locale)
+const HUB_INDEX_SLUG =
+  /^(services?|our-services|all-services|solutions?|our-solutions|offerings?|products?|our-products|shop|store|catalog|collections?|pricing|plans?|packages?|treatments?|menu|programs?|courses?|prestations?|produits?|tarifs?|soins?|diensten|oplossingen|interventions?)$/i;
 
 const JUNK_NAME =
-  /^(home|about( us)?|contact( us)?|blog|news|faq|faqs|login|log in|sign ?up|register|cart|checkout|privacy|terms|policy|search|menu|skip to content|read more|learn more|get started|book now|view all|shop all|services?|our services|all services|service areas?|areas? we serve|locations?|solutions?|our solutions|products?|our products|pricing|plans?|about .+|why choose us|how it works|testimonials?|reviews?|customer reviews?|client reviews?|videos?|downloads?|brochures?|manuals?|financing.*|payment plans?|contact|get a quote|request a quote|free quote|call now|whatsapp|gallery|resources?)$/i;
+  /^(home|accueil|startpagina|about( us)?|over ons|à propos|a propos|contact( us|eer ons|ez-nous)?|blog( & advice)?|advice|news|faq|faqs|login|log in|sign ?up|register|cart|checkout|privacy( policy)?|cookie(s| preferences| policy)?|terms( & conditions| of service)?|policy|search|menu|skip to content|read more|learn more|get started|book now|book a .+|view all|shop all|see all|explore .+|services?|our services|all services|onze diensten|nos services|service areas?|our service areas|areas? we serve|werkgebied|zones? d'intervention|locations?|solutions?|our solutions|nos solutions|onze oplossingen|products?|our products|pricing|plans?|why choose us|pourquoi nous choisir|waarom voor ons kiezen|how it works|how can we help( you)?|comment ça marche|hoe werkt het|testimonials?|reviews?|customer reviews?|customer feedback|client reviews?|avis clients?|klantenreviews?|videos?|downloads?|brochures?|manuals?|financing.*|payment plans?|get a quote|request a quote|free quote|vraag een offerte|demander un devis|call now|whatsapp|gallery|resources?)$/i;
 
-const MARKETING_SLOGAN_START =
-  /^(your |about |why |how |what |who |where |clear |advice |trusted |authorized |certified |welcome |discover |meet |get |find |need |looking for |serving |available )/i;
+// Conversational / slogan / CTA / step-heading patterns that are NEVER genuine service names
+const HEADING_OR_CTA_PATTERN =
+  /(\b(you|your|yours|we|our|us|my|me|yourself|wij|onze|ons|jouw|uw|vous|votre|vos|nous|notre|nos)\b|^(tell |discuss |let'?s |relax\b|welcome\b|discover\b|explore\b|meet\b|find\b|need\b|looking for\b|ready to\b|talk to\b|speak with\b|step \d|phase \d|why |how |what |who |where |when |trusted |authorized |certified |expert care|care that|the right |for your ))/i;
 
-function slugify(v: string, i: number): string {
+// Common European/global city names often linked under /loodgieter/<city> or /plumber/<city>
+const CITY_ONLY_NAME =
+  /^(brussel|brussels|bruxelles|antwerpen|antwerp|anvers|gent|ghent|gand|brugge|bruges|leuven|louvain|mechelen|malines|hasselt|genk|kortrijk|oostende|aalst|sint-niklaas|roeselare|turnhout|namur|namen|liège|liege|luik|charleroi|mons|bergen|wavre|waterloo|paris|lyon|marseille|lille|toulouse|bordeaux|nantes|amsterdam|rotterdam|utrecht|den haag|eindhoven|london|manchester|birmingham|berlin|munich|hamburg|cologne|frankfurt|casablanca|rabat|marrakech|tanger)$/i;
+
+export function slugify(v: string, i: number): string {
   const s = v
     .toLowerCase()
     .normalize('NFD')
@@ -55,55 +64,122 @@ function cleanText(v: unknown): string {
     .trim();
 }
 
-function goodName(n: string): boolean {
-  const words = n.split(/\s+/).filter(Boolean);
-  if (n.length < 3 || n.length > 58 || words.length > 6) return false;
-  if (JUNK_NAME.test(n)) return false;
-  if (MARKETING_SLOGAN_START.test(n)) return false;
-  if (/[?!]/.test(n)) return false;
+export function isValidOfferingName(n: string, slugHint = ''): boolean {
+  const trimmed = n.trim();
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (trimmed.length < 3 || trimmed.length > 54 || words.length > 6) return false;
+  if (/[?!:;…]/.test(trimmed)) return false;
+  if (/\.\s+[A-Z]/.test(trimmed) || trimmed.endsWith('.')) return false;
+  if (JUNK_NAME.test(trimmed)) return false;
+  if (HEADING_OR_CTA_PATTERN.test(trimmed)) return false;
+  if (CITY_ONLY_NAME.test(trimmed)) return false;
+  // Reject "<Brand> solutions" / "<Brand> services" hub labels
+  if (words.length === 2 && /\b(solutions?|services?|diensten|oplossingen|areas?|reviews?|feedback|partner)\b$/i.test(trimmed)) {
+    const firstLower = words[0].toLowerCase();
+    if (!/^(boiler|heating|plumbing|water|emergency|gas|heat|dental|skin|hair|legal|tax|cloud|web|seo|it|cleaning|electrical|roofing|hvac|auto|car)$/i.test(firstLower)) {
+      return false;
+    }
+  }
+  if (slugHint && HUB_INDEX_SLUG.test(slugHint)) return false;
   return true;
 }
 
-function categoryFromUrl(u: URL): string {
-  const seg = u.pathname.split('/').filter(Boolean);
-  const first = seg.find((s) => !/^[a-z]{2}(-[a-z]{2})?$/i.test(s));
-  return first && seg.length > 1 ? titleFromSlug(first) : '';
+function extractLocaleSegment(u: URL): string {
+  const segs = u.pathname.split('/').filter(Boolean);
+  if (segs.length > 0 && /^[a-z]{2}(-[a-z]{2})?$/i.test(segs[0])) {
+    return segs[0].toLowerCase().split('-')[0];
+  }
+  return '';
 }
 
-function inferAccurateCategory(name: string, slug: string, rawCategory: string): string {
+function nonLocaleSegments(u: URL): string[] {
+  const segs = u.pathname.split('/').filter(Boolean);
+  if (segs.length > 0 && /^[a-z]{2}(-[a-z]{2})?$/i.test(segs[0])) {
+    return segs.slice(1);
+  }
+  return segs;
+}
+
+function categoryFromUrl(u: URL): string {
+  const seg = nonLocaleSegments(u);
+  return seg.length >= 2 ? titleFromSlug(seg[0]) : '';
+}
+
+/**
+ * Granular, universal category inference across any industry (home services, HVAC, plumbing,
+ * healthcare/clinics, beauty/wellness, automotive, digital/software, hospitality, e-commerce).
+ * Distinguishes Maintenance, Installations, Repairs, Emergency, Plumbing, Water Heaters, and Heat Pumps
+ * instead of collapsing everything into one vague bucket.
+ */
+export function inferAccurateCategory(name: string, slug: string, rawCategory: string): string {
   const text = `${name} ${slug}`.toLowerCase();
-  if (/emergenc|urgent|spoed|dépannage|depannage|24\/7|notdienst/i.test(text)) {
-    return 'Emergency Repairs';
+
+  // Home / Technical / HVAC / Plumbing sub-disciplines (checked in most-specific order)
+  if (/\b(heat[- ]?pumps?|warmtepomp\w*|pompes?[- ]a[- ]chaleur|pompe[- ]à[- ]chaleur|geotherm\w*|hybrid[- ]heat\w*|solar|zonnepane\w*|panneaux?[- ]solaires?)\b/i.test(text)) {
+    return 'Heat Pumps & Renewables';
   }
-  if (/boiler|heat pump|heating|chauffage|verwarming|ketel|hot water|water heater|radiator|thermostat|hvac/i.test(text)) {
-    return 'Heating & Boilers';
+  if (/\b(emergenc\w*|urgent\w*|spoed\w*|d[eé]pannage|24\/7|notdienst)\b/i.test(text)) {
+    return 'Emergency Service';
   }
-  if (/leak|lek|fuite|plumb|plombier|loodgieter|pipe|drain|sink|toilet|tap|faucet/i.test(text)) {
-    return 'Plumbing & Leaks';
+  if (/\b(leak\w*|waterlek\w*|lekdetect\w*|fuites?|unblock\w*|drain\w*|ontstop\w*|d[eé]bouch\w*|sewer|riool\w*)\b/i.test(text)) {
+    return 'Leak & Drain Repair';
   }
-  if (/install|setup|montage|plaatsing|pose/i.test(text)) {
-    return 'Installations';
+  if (/\b(water[- ]?heaters?|hot[- ]?water|warm[- ]?water|chauffe[- ]?eau|sanitair[- ]?warm\w*|boiler[- ]?tank)\b/i.test(text)) {
+    return 'Water Heaters & Hot Water';
   }
-  if (/maintenance|entretien|onderhoud|inspection|checkup|service plan/i.test(text)) {
-    return 'Maintenance';
+  if (/\b(plumb\w*|plomb\w*|loodgieter\w*|sanitair\w*|sanitary|tap|faucet|toilet|sink|bathroom|badkamer|salle[- ]de[- ]bain|pipe\w*|tuyau\w*|leiding\w*)\b/i.test(text)) {
+    return 'Plumbing & Sanitary';
   }
-  if (/electr|wiring|panel|breaker|outlet|lighting/i.test(text)) {
-    return 'Electrical';
+  if (/\b(maintenance|entretien|onderhoud\w*|service[- ]?plan|inspection|check[- ]?up|tune[- ]?up|keuring\w*|attest\w*)\b/i.test(text)) {
+    return /\b(boiler|ketel|chaudi[eè]re|heat\w*|chauffage|verwarming|hvac)\b/i.test(text)
+      ? 'Boiler & Heating Maintenance'
+      : 'Maintenance & Inspections';
   }
-  if (/clean|nettoyage|schoonmaak|maid|carpet|window/i.test(text)) {
-    return 'Cleaning';
+  if (/\b(install\w*|replace\w*|vervang\w*|plaatsing|nieuwe[- ]verwarming|montage|pose|gas[- ]?boilers?|condens\w*)\b/i.test(text)) {
+    return /\b(boiler|ketel|chaudi[eè]re|heat\w*|chauffage|verwarming|gas)\b/i.test(text)
+      ? 'Boiler & Heating Installation'
+      : 'Installations';
   }
-  if (/dental|dentist|implant|whitening|orthodont|clinic|physio|therapy/i.test(text)) {
-    return 'Clinical Care';
+  if (/\b(boiler[- ]?repair|ketel[- ]?herstel\w*|herstelling|r[eé]paration|fault|breakdown|storing)\b/i.test(text)) {
+    return /\b(boiler|ketel|chaudi[eè]re|heat\w*|chauffage|verwarming|bulex|vaillant|viessmann)\b/i.test(text)
+      ? 'Boiler & Heating Repair'
+      : 'Repairs & Diagnostics';
   }
-  if (/seo|web|design|marketing|branding|ads|social|audit|consult/i.test(text)) {
-    return 'Digital & Consulting';
+  if (/\b(heating[- ]?systems?|central[- ]?heating|radiator\w*|thermostat\w*|underfloor|vloerverwarming|chauffage|verwarming|hvac|airco|air[- ]?conditioning)\b/i.test(text)) {
+    return 'Heating Systems';
   }
+  if (/\b(electr\w*|wiring|panel|breaker|outlet|lighting|ev[- ]?charger|laadpaal)\b/i.test(text)) {
+    return 'Electrical Services';
+  }
+  if (/\b(clean\w*|nettoyage|schoonmaak|carpet|window|maid|housekeep\w*)\b/i.test(text)) {
+    return 'Cleaning Services';
+  }
+  if (/\b(dental|dentist|implant\w*|whitening|orthodont\w*|aligner\w*|root[- ]?canal|hygiene)\b/i.test(text)) {
+    return 'Dental Care';
+  }
+  if (/\b(clinic|medical|physio\w*|osteopath\w*|therapy|dermatol\w*|chiropract\w*|checkup)\b/i.test(text)) {
+    return 'Clinical & Wellness Care';
+  }
+  if (/\b(hair\w*|salon|barber|facial|massage|manicure|pedicure|lash\w*|brow\w*|spa|waxing)\b/i.test(text)) {
+    return 'Beauty & Salon';
+  }
+  if (/\b(seo|web[- ]?design|website|ppc|google[- ]?ads|branding|social[- ]?media|copywriting|devops|cloud|saas|software)\b/i.test(text)) {
+    return 'Digital & Software Services';
+  }
+  if (/\b(legal|lawyer|attorney|notary|tax|accounting|bookkeep\w*|payroll|incorporation)\b/i.test(text)) {
+    return 'Legal & Advisory';
+  }
+
   const cleanRaw = rawCategory.trim();
-  if (cleanRaw && !/^(services?|solutions?|general|pages?|en|fr|nl|de)$/i.test(cleanRaw)) {
+  if (
+    cleanRaw &&
+    !/^(services?|solutions?|diensten|oplossingen|prestations?|general|pages?|items?|en|fr|nl|de|es|it|pt|ar)$/i.test(
+      cleanRaw
+    )
+  ) {
     return cleanRaw;
   }
-  return 'General Services';
+  return 'Core Offerings';
 }
 
 // ---- WooCommerce ----
@@ -125,7 +201,7 @@ export async function tryWooCommerce(origin: string, fetcher: Fetcher): Promise<
         item_id: String(p.id ?? i + 1),
         item_slug: p.slug || slugify(p.name!, i + 1),
         item_name: cleanText(p.name),
-        category: cleanText(p.categories?.[0]?.name) || 'General',
+        category: cleanText(p.categories?.[0]?.name) || 'Products',
         product_url: p.permalink || `${origin}/product/${p.slug}`,
       }));
   } catch {
@@ -135,7 +211,7 @@ export async function tryWooCommerce(origin: string, fetcher: Fetcher): Promise<
 
 // ---- JSON-LD ----
 const ITEM_TYPES =
-  /^(Product|Service|Course|MenuItem|Offer|IndividualProduct|ProductModel|SoftwareApplication|Event|Physician|MedicalProcedure)$/i;
+  /^(Product|Service|Course|MenuItem|Offer|IndividualProduct|ProductModel|SoftwareApplication|MedicalProcedure)$/i;
 
 function walkLd(node: unknown, out: { name: string; url?: string; category?: string }[], depth = 0) {
   if (!node || depth > 7 || out.length > 80) return;
@@ -177,7 +253,8 @@ export function extractJsonLdItems(html: string, pageUrl: URL): ScrapedItem[] {
       const found: { name: string; url?: string; category?: string }[] = [];
       walkLd(JSON.parse(m[1].trim()), found);
       for (const f of found) {
-        if (!goodName(f.name)) continue;
+        const candidateSlug = slugify(f.name, items.length + 1);
+        if (!isValidOfferingName(f.name, candidateSlug)) continue;
         let url = pageUrl.toString();
         try {
           if (f.url) url = new URL(f.url, pageUrl).toString();
@@ -186,7 +263,7 @@ export function extractJsonLdItems(html: string, pageUrl: URL): ScrapedItem[] {
         }
         items.push({
           item_id: '',
-          item_slug: slugify(f.name, items.length + 1),
+          item_slug: candidateSlug,
           item_name: f.name,
           category: f.category || '',
           product_url: url,
@@ -199,14 +276,21 @@ export function extractJsonLdItems(html: string, pageUrl: URL): ScrapedItem[] {
   return items;
 }
 
-// ---- Sitemap ----
-export async function extractSitemapItems(origin: string, fetcher: Fetcher): Promise<ScrapedItem[]> {
+// ---- Sitemap (Locale-Aware) ----
+export async function extractSitemapItems(
+  origin: string,
+  fetcher: Fetcher,
+  scannedUrl?: URL
+): Promise<ScrapedItem[]> {
   const locs: string[] = [];
   const grab = (xml: string) => {
-    const re = /<loc>\s*(?:<!\[CDATA\[)?\s*([^<\]\s]+)\s*(?:\]\]>)?\s*<\/loc>/gi;
+    // Also pick up hreflang alternates matching scanned locale when present!
     const found: string[] = [];
+    const locRe = /<loc>\s*(?:<!\[CDATA\[)?\s*([^<\]\s]+)\s*(?:\]\]>)?\s*<\/loc>/gi;
     let m: RegExpExecArray | null;
-    while ((m = re.exec(xml)) !== null) found.push(m[1]);
+    while ((m = locRe.exec(xml)) !== null) found.push(m[1]);
+    const altRe = /<xhtml:link[^>]+href=["']([^"']+)["'][^>]*>/gi;
+    while ((m = altRe.exec(xml)) !== null) found.push(m[1]);
     return found;
   };
   try {
@@ -226,104 +310,132 @@ export async function extractSitemapItems(origin: string, fetcher: Fetcher): Pro
     return [];
   }
 
-  const items: ScrapedItem[] = [];
+  const targetLocale = scannedUrl ? extractLocaleSegment(scannedUrl) : '';
+  const parsedCandidates: URL[] = [];
+  const seenUrls = new Set<string>();
+
   for (const raw of locs) {
     try {
       const u = new URL(raw);
       if (u.origin !== origin) continue;
+      const key = `${u.origin}${u.pathname.replace(/\/+$/, '')}`;
+      if (seenUrls.has(key)) continue;
+      seenUrls.add(key);
       if (JUNK_PATH.test(u.pathname)) continue;
       if (!SIGNAL_PATH.test(u.pathname.endsWith('/') ? u.pathname : u.pathname + '/')) continue;
-      const segs = u.pathname.split('/').filter(Boolean);
-      if (segs.length < 2) continue;
-      const last = segs[segs.length - 1];
-      const name = titleFromSlug(last);
-      if (!goodName(name)) continue;
-      items.push({
-        item_id: '',
-        item_slug: slugify(last, items.length + 1),
-        item_name: name,
-        category: categoryFromUrl(u),
-        product_url: `${u.origin}${u.pathname}`,
-      });
-      if (items.length >= 40) break;
+      const nonLoc = nonLocaleSegments(u);
+      if (nonLoc.length < 2) continue; // Skip hub index pages like /services or /en/services
+      parsedCandidates.push(u);
     } catch {
       /* skip */
     }
   }
-  return items;
-}
 
-// ---- Links & headings from scanned pages ----
-export function itemsFromLinksAndHeadings(
-  pages: { url: string; headings: string[]; navAndServiceLinks: { text: string; url: string }[] }[]
-): ScrapedItem[] {
+  // If user scanned a specific locale (e.g. /en) and the site has offering URLs in that locale,
+  // strictly prefer that locale so we never mix duplicate bilingual URLs (/diensten/* + /en/services/*)!
+  const localeFiltered = targetLocale
+    ? parsedCandidates.filter((u) => extractLocaleSegment(u) === targetLocale)
+    : parsedCandidates.filter((u) => extractLocaleSegment(u) === '');
+  const effectiveUrls = localeFiltered.length >= 3 ? localeFiltered : parsedCandidates;
+
   const items: ScrapedItem[] = [];
-  pages.forEach((p, idx) => {
-    for (const l of p.navAndServiceLinks) {
-      const name = cleanText(l.text);
-      if (!goodName(name) || /^see all|^explore |^view all/i.test(name)) continue;
-      let cat = '';
-      try {
-        const parsed = new URL(l.url);
-        if (JUNK_PATH.test(parsed.pathname)) continue;
-        cat = categoryFromUrl(parsed);
-      } catch {
-        continue;
-      }
-      items.push({
-        item_id: '',
-        item_slug: slugify(name, items.length + 1),
-        item_name: name,
-        category: cat,
-        product_url: l.url,
-      });
-    }
-    if (idx > 0) {
-      for (const h of p.headings.slice(0, 10)) {
-        const name = cleanText(h);
-        if (!goodName(name)) continue;
-        items.push({
-          item_id: '',
-          item_slug: slugify(name, items.length + 1),
-          item_name: name,
-          category: '',
-          product_url: p.url,
-        });
-      }
-    }
-  });
-  if (items.length === 0 && pages[0]) {
-    for (const h of pages[0].headings.slice(0, 12)) {
-      const name = cleanText(h);
-      if (!goodName(name)) continue;
-      items.push({
-        item_id: '',
-        item_slug: slugify(name, items.length + 1),
-        item_name: name,
-        category: '',
-        product_url: pages[0].url,
-      });
-    }
+  for (const u of effectiveUrls) {
+    const nonLoc = nonLocaleSegments(u);
+    const last = nonLoc[nonLoc.length - 1];
+    if (HUB_INDEX_SLUG.test(last)) continue;
+    const name = titleFromSlug(last);
+    if (!isValidOfferingName(name, last)) continue;
+    items.push({
+      item_id: '',
+      item_slug: slugify(last, items.length + 1),
+      item_name: name,
+      category: categoryFromUrl(u),
+      product_url: `${u.origin}${u.pathname}`,
+    });
+    if (items.length >= 40) break;
   }
   return items;
 }
 
-// ---- Merge ----
+// ---- Leaf Offering Links ONLY (Never scrape conversational page headings as services!) ----
+export function itemsFromLinksAndHeadings(
+  pages: { url: string; headings: string[]; navAndServiceLinks: { text: string; url: string }[] }[],
+  scannedUrl?: URL
+): ScrapedItem[] {
+  const targetLocale = scannedUrl ? extractLocaleSegment(scannedUrl) : '';
+  const items: ScrapedItem[] = [];
+
+  for (const p of pages) {
+    for (const l of p.navAndServiceLinks) {
+      const name = cleanText(l.text);
+      let parsed: URL;
+      try {
+        parsed = new URL(l.url);
+      } catch {
+        continue;
+      }
+      if (JUNK_PATH.test(parsed.pathname)) continue;
+      const linkLocale = extractLocaleSegment(parsed);
+      if (targetLocale && linkLocale && linkLocale !== targetLocale) continue;
+
+      const nonLoc = nonLocaleSegments(parsed);
+      // Require leaf offering URLs (e.g. /services/boiler-repair, /treatments/root-canal, /products/x),
+      // NEVER top-level navigation hubs (/services, /solutions, /about, /pricing)!
+      if (nonLoc.length < 2) continue;
+      const leafSlug = nonLoc[nonLoc.length - 1];
+      if (HUB_INDEX_SLUG.test(leafSlug)) continue;
+      if (!isValidOfferingName(name, leafSlug)) continue;
+
+      items.push({
+        item_id: '',
+        item_slug: slugify(leafSlug || name, items.length + 1),
+        item_name: name,
+        category: categoryFromUrl(parsed),
+        product_url: `${parsed.origin}${parsed.pathname}`,
+      });
+    }
+  }
+
+  return items;
+}
+
+// ---- Merge & Deduplicate Synonym / Duplicate URL Slugs ----
 export function mergeItems(groups: ScrapedItem[][], max = 24): ScrapedItem[] {
-  const seen = new Set<string>();
+  const seenSlugs = new Set<string>();
+  const seenNames = new Set<string>();
+  const seenPaths = new Set<string>();
   const out: ScrapedItem[] = [];
+
   for (const g of groups) {
     for (const it of g) {
-      if (!goodName(it.item_name)) continue;
-      const key = it.item_slug || slugify(it.item_name, out.length);
-      const nameKey = it.item_name.toLowerCase();
-      if (seen.has(key) || seen.has(nameKey)) continue;
-      seen.add(key);
-      seen.add(nameKey);
+      const cleanName = cleanText(it.item_name);
+      const rawSlug = it.item_slug || slugify(cleanName, out.length + 1);
+      if (!isValidOfferingName(cleanName, rawSlug)) continue;
+
+      let pathKey = '';
+      try {
+        const u = new URL(it.product_url);
+        const nonLoc = nonLocaleSegments(u);
+        pathKey = nonLoc[nonLoc.length - 1]?.toLowerCase() || '';
+      } catch {
+        pathKey = rawSlug.toLowerCase();
+      }
+
+      const slugKey = (pathKey || rawSlug).toLowerCase();
+      const nameKey = cleanName.toLowerCase();
+      if (seenSlugs.has(slugKey) || seenNames.has(nameKey) || (pathKey && seenPaths.has(pathKey))) {
+        continue;
+      }
+      seenSlugs.add(slugKey);
+      seenNames.add(nameKey);
+      if (pathKey) seenPaths.add(pathKey);
+
       out.push({
         ...it,
         item_id: String(out.length + 1),
-        category: inferAccurateCategory(it.item_name, it.item_slug, it.category),
+        item_slug: slugify(pathKey || rawSlug, out.length + 1),
+        item_name: cleanName,
+        category: inferAccurateCategory(cleanName, slugKey, it.category),
       });
       if (out.length >= max) return out;
     }
@@ -332,7 +444,7 @@ export function mergeItems(groups: ScrapedItem[][], max = 24): ScrapedItem[] {
 }
 
 export function businessNameFrom(page: { ogSiteName: string; title: string }, hostname: string): string {
-  const raw = page.ogSiteName || page.title.split(/[|\u2013\u2014-]/).pop() || hostname;
+  const raw = page.ogSiteName || page.title.split(/[|\u2013\u2014]/).pop() || hostname;
   const n = cleanText(raw).slice(0, 60);
   return n || hostname.replace(/^www\./, '');
 }

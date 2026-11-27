@@ -3,7 +3,9 @@ import {
   AlertTriangle,
   CheckCircle2,
   Download,
+  FileText,
   Loader2,
+  Lock,
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
@@ -25,8 +27,17 @@ import {
   YAxis,
 } from 'recharts';
 import { AIConnectionStatus } from '../hooks/useAISettings';
-import { GeneratedReview, LANGUAGE_OPTIONS } from '../types/reviews';
-import { runDatasetIntegrityAudit } from '../utils/datasetIntegrity';
+import {
+  BusinessVoicePack,
+  CatalogProduct,
+  GeneratedReview,
+  LANGUAGE_OPTIONS,
+} from '../types/reviews';
+import {
+  QualityScorecard,
+  runDatasetIntegrityAudit,
+} from '../utils/datasetIntegrity';
+import { maskCustomerEmail } from '../utils/csv';
 import { FlagBadge } from './FlagBadge';
 
 export interface ReviewAuditEntry {
@@ -36,6 +47,7 @@ export interface ReviewAuditEntry {
   signals?: string[];
   flaggedPhrases?: string[];
   suggestion?: string;
+  suggestedItemSlug?: string;
   dimensions?: {
     naturalTone: number;
     domainFit: number;
@@ -76,6 +88,14 @@ export interface AuditRunSummary {
 
 interface AIDetectorViewProps {
   reviews: GeneratedReview[];
+  rejectedReviews: GeneratedReview[];
+  validOfferings: CatalogProduct[];
+  adaptedPack: BusinessVoicePack | null;
+  detectedCountryCode?: string;
+  baselineScorecard: QualityScorecard | null;
+  autoFixProgress: string | null;
+  maskEmailsOnExport: boolean;
+  onToggleMaskEmails: () => void;
   reviewAuditMap: Record<string, ReviewAuditEntry>;
   auditRuns: AuditRunSummary[];
   activeBusinessLabel: string;
@@ -88,6 +108,7 @@ interface AIDetectorViewProps {
   onOpenWorkbench: () => void;
   onAuditReviews: (target: GeneratedReview[]) => Promise<void>;
   onRewriteFlagged: (target: GeneratedReview[]) => Promise<void>;
+  onAutoFixDataset: () => Promise<void>;
   onRegenerateReview: (reviewId: string) => void;
   onDeleteReview: (reviewId: string) => void;
   onDeleteFlaggedReviews: (ids: string[]) => void;
@@ -97,6 +118,8 @@ interface AIDetectorViewProps {
   onToggleVerified: (reviewId: string) => void;
   onApproveCleanReviews: (ids: string[]) => void;
   onExportVerifiedOnly: () => void;
+  onExportRejectedCSV: () => void;
+  onExportQCReport: () => void;
 }
 
 type VerdictFilter = 'all' | 'ai_flagged' | 'generic' | 'human' | 'unchecked' | 'issues';
@@ -111,6 +134,14 @@ const VERDICT_COLORS = {
 
 export function AIDetectorView({
   reviews,
+  rejectedReviews,
+  validOfferings,
+  adaptedPack,
+  detectedCountryCode,
+  baselineScorecard,
+  autoFixProgress,
+  maskEmailsOnExport,
+  onToggleMaskEmails,
   reviewAuditMap,
   auditRuns,
   activeBusinessLabel,
@@ -123,6 +154,7 @@ export function AIDetectorView({
   onOpenWorkbench,
   onAuditReviews,
   onRewriteFlagged,
+  onAutoFixDataset,
   onRegenerateReview,
   onDeleteReview,
   onDeleteFlaggedReviews,
@@ -132,12 +164,24 @@ export function AIDetectorView({
   onToggleVerified,
   onApproveCleanReviews,
   onExportVerifiedOnly,
+  onExportRejectedCSV,
+  onExportQCReport,
 }: AIDetectorViewProps) {
   const [verdictFilter, setVerdictFilter] = useState<VerdictFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [rowSort, setRowSort] = useState<RowSortMode>('flagged_first');
   const verifiedSet = useMemo(() => new Set(verifiedIds), [verifiedIds]);
-  const integrity = useMemo(() => runDatasetIntegrityAudit(reviews), [reviews]);
+  const integrity = useMemo(
+    () =>
+      runDatasetIntegrityAudit(reviews, {
+        verifiedIds,
+        validOfferings,
+        adaptedPack,
+        companyName: activeBusinessLabel,
+        detectedCountryCode,
+      }),
+    [reviews, verifiedIds, validOfferings, adaptedPack, activeBusinessLabel, detectedCountryCode]
+  );
 
   const emailCountMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -149,7 +193,7 @@ export function AIDetectorView({
   }, [reviews]);
 
   const rowsWithIssuesCount = useMemo(
-    () => reviews.filter((r) => Boolean(integrity.issuesByReviewId[r.id]?.length)).length,
+    () => reviews.filter((r) => integrity.flaggedReviewIds.includes(r.id)).length,
     [reviews, integrity]
   );
 
@@ -669,113 +713,317 @@ export function AIDetectorView({
             </div>
           </section>
 
-          {/* Instant Dataset Integrity Audit (Repeated sentences, Repeat reviewers & dates, Marketing phrases) */}
-          <section className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Live Dataset Integrity & Publishing Gate
-                </h2>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  Checks repeated sentences, repeat reviewer dates, marketing expressions, and service fit — approve only genuine reviews before publishing.
+          {/* Mandatory 100-Point Quality-Control Audit, AI Auto-Fix & Deliverables Gate */}
+          <section className="bg-white border border-slate-200 rounded-xl p-5 space-y-5">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h2 className="text-sm font-bold text-slate-900">
+                    Mandatory Quality-Control Audit & Publication Gate
+                  </h2>
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                      integrity.scorecard.publicationApproved
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : 'bg-amber-50 text-amber-800 border border-amber-200'
+                    }`}
+                  >
+                    {integrity.scorecard.publicationApproved
+                      ? `APPROVED · ${integrity.scorecard.weightedTotal100}/100`
+                      : `HOLD · ${integrity.scorecard.weightedTotal100}/100 (Target ≥ 90/100)`}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-mono font-semibold bg-sky-50 text-sky-800 border border-sky-200">
+                    Content Readiness: {integrity.scorecard.contentReadiness100}/100
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Evaluates Source Authenticity (30%), Originality (20%), Natural Language (15%), Service Relevance (15%), Data Consistency (10%), and Multilingual Quality (10%). Missing source verification prevents publication approval.
                 </p>
               </div>
+
               <div className="flex flex-wrap items-center gap-2">
+                {aiOnline && (
+                  <button
+                    type="button"
+                    disabled={reviews.length === 0 || isRewriting || isAuditing}
+                    onClick={() => void onAutoFixDataset()}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 rounded-xl shadow-sm transition-all cursor-pointer"
+                  >
+                    {isRewriting ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Wand2 className="w-3.5 h-3.5" />
+                    )}
+                    <span>
+                      {isRewriting
+                        ? autoFixProgress || 'AI Auto-Fixing…'
+                        : `AI Auto-Fix All Issues (${integrity.flaggedReviewIds.length} flagged)`}
+                    </span>
+                  </button>
+                )}
+
                 {integrity.flaggedReviewIds.length > 0 && (
                   <button
                     type="button"
                     onClick={() => onDeleteFlaggedReviews(integrity.flaggedReviewIds)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition-colors cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>Exclude Unsupported ({integrity.flaggedReviewIds.length})</span>
+                    <span>Move Unsupported to Rejected ({integrity.flaggedReviewIds.length})</span>
                   </button>
                 )}
+
                 <button
                   type="button"
                   onClick={() => {
                     const cleanIds = reviews
                       .filter((r) => {
-                        const hasLocalIssue = Boolean(integrity.issuesByReviewId[r.id]?.length);
+                        const hasContentIssue = integrity.flaggedReviewIds.includes(r.id);
                         const audit = reviewAuditMap[r.id];
-                        return !hasLocalIssue && (!audit || audit.verdict === 'human');
+                        return !hasContentIssue && (!audit || audit.verdict === 'human');
                       })
                       .map((r) => r.id);
                     onApproveCleanReviews(cleanIds);
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-colors cursor-pointer"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Verify Clean Only</span>
+                  <span>Confirm Source Verification on Clean Rows</span>
                 </button>
               </div>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 text-xs">
+
+            {/* 6 Weighted Dimensions + Before/After Comparison */}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
               {[
                 {
-                  label: 'Unique Emails',
-                  val: `${integrity.uniqueEmailCount}/${reviews.length}`,
-                  ok: integrity.duplicateEmailCount === 0,
+                  label: 'Source Auth (30%)',
+                  before: baselineScorecard?.sourceAuthenticity100,
+                  after: integrity.scorecard.sourceAuthenticity100,
                 },
                 {
-                  label: 'Inserted Headings',
-                  val: integrity.insertedHeadingCount,
-                  ok: integrity.insertedHeadingCount === 0,
+                  label: 'Originality (20%)',
+                  before: baselineScorecard?.originality100,
+                  after: integrity.scorecard.originality100,
                 },
                 {
-                  label: 'Repeated Templates',
-                  val: integrity.repeatedSentenceCount,
-                  ok: integrity.repeatedSentenceCount === 0,
+                  label: 'Natural Lang (15%)',
+                  before: baselineScorecard?.naturalLanguage100,
+                  after: integrity.scorecard.naturalLanguage100,
                 },
                 {
-                  label: 'Broken Grammar',
-                  val: integrity.brokenGrammarCount,
-                  ok: integrity.brokenGrammarCount === 0,
+                  label: 'Service Fit (15%)',
+                  before: baselineScorecard?.serviceRelevance100,
+                  after: integrity.scorecard.serviceRelevance100,
                 },
                 {
-                  label: 'Mixed-Lang Service',
-                  val: integrity.mixedLanguageServiceCount,
-                  ok: integrity.mixedLanguageServiceCount === 0,
+                  label: 'Consistency (10%)',
+                  before: baselineScorecard?.dataConsistency100,
+                  after: integrity.scorecard.dataConsistency100,
                 },
                 {
-                  label: 'Promotional Copy',
-                  val: integrity.marketingPhraseCount,
-                  ok: integrity.marketingPhraseCount === 0,
+                  label: 'Multilingual (10%)',
+                  before: baselineScorecard?.multilingual100,
+                  after: integrity.scorecard.multilingual100,
                 },
-                {
-                  label: 'Wrong Service / Date',
-                  val:
-                    integrity.incorrectServiceCount +
-                    integrity.offDomainCount +
-                    integrity.repeatDateIssues +
-                    integrity.futureDateCount,
-                  ok:
-                    integrity.incorrectServiceCount +
-                      integrity.offDomainCount +
-                      integrity.repeatDateIssues +
-                      integrity.futureDateCount ===
-                    0,
-                },
-                {
-                  label: 'Verified Genuine',
-                  val: `${verifiedIds.length}/${reviews.length}`,
-                  ok: verifiedIds.length > 0,
-                },
-              ].map((m) => (
+              ].map((dim) => (
                 <div
-                  key={m.label}
-                  className="p-2.5 rounded-lg bg-slate-50/80 border border-slate-200/80 flex items-center justify-between gap-2"
+                  key={dim.label}
+                  className="p-3 rounded-lg bg-slate-50 border border-slate-200/90 space-y-1"
                 >
-                  <span className="text-[11px] text-slate-500 truncate">{m.label}</span>
-                  <span
-                    className={`font-mono font-bold text-xs ${
-                      m.ok ? 'text-emerald-600' : 'text-rose-600'
-                    }`}
-                  >
-                    {m.val}
-                  </span>
+                  <div className="text-[11px] font-medium text-slate-500 truncate">{dim.label}</div>
+                  <div className="flex items-baseline gap-1.5">
+                    <span
+                      className={`text-lg font-bold font-mono tabular-nums ${
+                        dim.after >= 90
+                          ? 'text-emerald-700'
+                          : dim.after >= 70
+                          ? 'text-amber-700'
+                          : 'text-rose-700'
+                      }`}
+                    >
+                      {dim.after}
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-400">/100</span>
+                    {typeof dim.before === 'number' && dim.before !== dim.after && (
+                      <span className="text-[10px] font-mono text-slate-500 ml-auto">
+                        was {dim.before}
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
+            </div>
+
+            {/* 5 Target Benchmarks (0-10 Scale) + Mandatory Hard Gates */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 pt-1">
+              <div className="p-3.5 rounded-lg bg-slate-50/70 border border-slate-200 space-y-2">
+                <div className="text-xs font-semibold text-slate-800">
+                  Before vs. After Benchmark Scores (0–10 Scale)
+                </div>
+                <div className="grid grid-cols-5 gap-2 text-center">
+                  {[
+                    {
+                      name: 'Natural Lang',
+                      before: baselineScorecard?.rubric10.naturalLanguage,
+                      cur: integrity.scorecard.rubric10.naturalLanguage,
+                      target: 9.0,
+                    },
+                    {
+                      name: 'Originality',
+                      before: baselineScorecard?.rubric10.originality,
+                      cur: integrity.scorecard.rubric10.originality,
+                      target: 9.0,
+                    },
+                    {
+                      name: 'Tech Fit',
+                      before: baselineScorecard?.rubric10.technicalRelevance,
+                      cur: integrity.scorecard.rubric10.technicalRelevance,
+                      target: 9.5,
+                    },
+                    {
+                      name: 'Service Map',
+                      before: baselineScorecard?.rubric10.serviceCategorization,
+                      cur: integrity.scorecard.rubric10.serviceCategorization,
+                      target: 10.0,
+                    },
+                    {
+                      name: 'Overall',
+                      before: baselineScorecard?.rubric10.overallQuality,
+                      cur: integrity.scorecard.rubric10.overallQuality,
+                      target: 9.0,
+                    },
+                  ].map((b) => (
+                    <div key={b.name} className="p-2 rounded bg-white border border-slate-200">
+                      <div className="text-[10px] text-slate-500 truncate">{b.name}</div>
+                      <div
+                        className={`text-sm font-bold font-mono mt-0.5 ${
+                          b.cur >= b.target ? 'text-emerald-700' : 'text-amber-700'
+                        }`}
+                      >
+                        {b.cur.toFixed(1)}/10
+                      </div>
+                      <div className="text-[9px] font-mono text-slate-400">
+                        {typeof b.before === 'number' ? `before ${b.before.toFixed(1)}` : `target ${b.target}`}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-lg bg-slate-50/70 border border-slate-200 space-y-2">
+                <div className="text-xs font-semibold text-slate-800">
+                  6 Mandatory Publication Conditions
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px]">
+                  {[
+                    {
+                      ok: integrity.scorecard.mandatoryGates.zeroExactDuplicates,
+                      label: `Zero exact duplicates (${integrity.exactDuplicateCount})`,
+                    },
+                    {
+                      ok: integrity.scorecard.mandatoryGates.zeroHeadingServices,
+                      label: `Zero website headings as services (${integrity.insertedHeadingCount})`,
+                    },
+                    {
+                      ok: integrity.scorecard.mandatoryGates.zeroMixedLanguageLabels,
+                      label: `Zero mixed-language labels (${integrity.mixedLanguageServiceCount + integrity.languageMismatchCount})`,
+                    },
+                    {
+                      ok: integrity.scorecard.mandatoryGates.zeroFabricatedOrOffDomain,
+                      label: `Zero off-domain / broken grammar (${integrity.offDomainCount + integrity.brokenGrammarCount})`,
+                    },
+                    {
+                      ok: integrity.scorecard.mandatoryGates.allServicesVerifiedOrFlagged,
+                      label: `All service mappings accurate (${integrity.incorrectServiceCount + integrity.mechanicalInsertionCount} bad)`,
+                    },
+                    {
+                      ok: integrity.scorecard.mandatoryGates.allUnsupportedExcludedAndVerified,
+                      label: `Sources verified & ratings consistent (${integrity.unverifiedSourceCount} unverified)`,
+                    },
+                  ].map((g) => (
+                    <div key={g.label} className="flex items-center gap-1.5">
+                      <span
+                        className={`w-2 h-2 rounded-full shrink-0 ${
+                          g.ok ? 'bg-emerald-500' : 'bg-rose-500'
+                        }`}
+                      />
+                      <span className={g.ok ? 'text-slate-700' : 'text-rose-700 font-medium'}>
+                        {g.label}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {integrity.scorecard.blockingReasons.length > 0 && (
+              <div className="px-3.5 py-2.5 rounded-lg bg-amber-50/90 border border-amber-200 text-xs text-amber-900 space-y-1">
+                <div className="font-semibold">Remaining Gates Before Publication Approval:</div>
+                <ul className="list-disc pl-4 space-y-0.5 text-[11px]">
+                  {integrity.scorecard.blockingReasons.map((br) => (
+                    <li key={br}>{br}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Deliverables Export Bar (Cleaned CSV, Rejected/Flagged CSV, Detailed QC Report, Email Privacy) */}
+            <div className="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
+              <label className="inline-flex items-center gap-2 text-xs text-slate-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={maskEmailsOnExport}
+                  onChange={onToggleMaskEmails}
+                  className="w-4 h-4 rounded border-slate-300 text-sky-700 accent-sky-700 cursor-pointer"
+                />
+                <Lock className="w-3.5 h-3.5 text-slate-500" />
+                <span>Keep customer emails private on export (mask PII)</span>
+              </label>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={!integrity.scorecard.publicationApproved && verifiedIds.length === 0}
+                  onClick={onExportVerifiedOnly}
+                  title={
+                    integrity.scorecard.publicationApproved
+                      ? 'Download verified publication-ready CSV'
+                      : 'Verify clean rows against source records first to unlock publication CSV'
+                  }
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 disabled:text-slate-500 disabled:cursor-not-allowed rounded-lg transition-colors cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>
+                    1. Publication-Ready CSV ({verifiedIds.length} verified)
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={
+                    rejectedReviews.length === 0 &&
+                    integrity.flaggedReviewIds.length === 0 &&
+                    integrity.unverifiedSourceCount === 0
+                  }
+                  onClick={onExportRejectedCSV}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 disabled:opacity-40 rounded-lg transition-colors cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>
+                    2. Rejected / Flagged CSV ({rejectedReviews.length + integrity.flaggedReviewIds.length})
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onExportQCReport}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg transition-colors cursor-pointer"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>3. Detailed QC Report (.md)</span>
+                </button>
+              </div>
             </div>
           </section>
 
@@ -922,7 +1170,11 @@ export function AIDetectorView({
                       {/* Reviewer & Email Metadata Row */}
                       <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
                         <span className="font-medium text-slate-700">{review.reviewer_name}</span>
-                        <span className="font-mono text-slate-400">{review.reviewer_email}</span>
+                        <span className="font-mono text-slate-400">
+                          {maskEmailsOnExport
+                            ? maskCustomerEmail(review.reviewer_email)
+                            : review.reviewer_email}
+                        </span>
                         {emailCount > 1 ? (
                           <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-50 text-sky-700 border border-sky-200">
                             Repeat Reviewer ({emailCount}×)
@@ -930,6 +1182,16 @@ export function AIDetectorView({
                         ) : (
                           <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
                             Unique Email
+                          </span>
+                        )}
+                        {review.modificationLog && review.modificationLog.length > 0 && (
+                          <span
+                            title={review.modificationLog
+                              .map((m) => `${m.field}: "${m.before}" → "${m.after}" (${m.reason})`)
+                              .join('\n')}
+                            className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200"
+                          >
+                            Remediated ({review.modificationLog.length} edit{review.modificationLog.length === 1 ? '' : 's'})
                           </span>
                         )}
                       </div>

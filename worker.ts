@@ -13,6 +13,7 @@ import {
   type AIUsageMetrics,
   type ReviewAuditInput,
   type ServerAIEnv,
+  type ValidOfferingOption,
 } from './ai-core.ts';
 import {
   extractHtmlSignals,
@@ -25,6 +26,8 @@ import {
   businessNameFrom,
   extractJsonLdItems,
   extractSitemapItems,
+  inferAccurateCategory,
+  isValidOfferingName,
   itemsFromLinksAndHeadings,
   mergeItems,
   tryWooCommerce,
@@ -244,17 +247,22 @@ async function scanWebsite(req: Request, env: Env): Promise<Response> {
     const [woo, sitemap] =
       shopify.length > 0
         ? [[], []]
-        : await Promise.all([tryWooCommerce(origin, safeFetchPublicUrl), extractSitemapItems(origin, safeFetchPublicUrl)]);
+        : await Promise.all([
+            tryWooCommerce(origin, safeFetchPublicUrl),
+            extractSitemapItems(origin, safeFetchPublicUrl, home.finalUrl),
+          ]);
 
-    const heuristicItems = mergeItems([woo, ld, sitemap, itemsFromLinksAndHeadings(pages)]);
+    const heuristicItems = mergeItems([woo, ld, sitemap, itemsFromLinksAndHeadings(pages, home.finalUrl)]);
 
     // Optional AI enrichment if user configured an API key or unlocked fallback AI
     interface WorkerParsedScan {
       businessType?: string;
+      detectedCountryCode?: string;
       discoveredItems?: Array<{ item_name: string; item_slug: string; category: string; product_url?: string }>;
       detectedBusinessName?: string;
       businessSummary?: string;
       productClassifications?: Array<{ item_slug: string; cleanName: string; category: string }>;
+      offeringContexts?: unknown[];
       categoryContext?: unknown[];
       languagePacks?: unknown[];
     }
@@ -277,6 +285,9 @@ async function scanWebsite(req: Request, env: Env): Promise<Response> {
               p.title ? `Title: ${p.title}` : '',
               p.metaDescription ? `Meta: ${p.metaDescription}` : '',
               p.headings.length ? `Headings: ${p.headings.slice(0, 18).join(' | ')}` : '',
+              p.navAndServiceLinks.length
+                ? `Links: ${p.navAndServiceLinks.slice(0, 15).map((l) => `${l.text} (${l.url})`).join('; ')}`
+                : '',
               p.bodyExcerpt ? `Excerpt: ${p.bodyExcerpt.slice(0, 2600)}` : '',
             ]
               .filter(Boolean)
@@ -284,21 +295,21 @@ async function scanWebsite(req: Request, env: Env): Promise<Response> {
           )
           .join('\n\n');
 
-        const prompt = `Scan this website's public information, identify its real services or products, and build a tailored multi-language customer review pack.
+        const prompt = `Scan this website's public information, identify ONLY its real services or products, and build a tailored multi-language customer review pack.
 Target URL: ${validated.toString()}
 User notes: ${businessContext || '(Auto-detect)'}
 ${shopifySection}
 ${pagesSection}
 Target languages: ${languages.join(', ')}
 CRITICAL RULES:
-1. Determine accurately if this is a "service" business (plumber, heating/boiler technician, electrician, clinic, agency, salon, repair, cleaning, etc.) or an "ecommerce" store selling shipped physical goods.
-2. Extract 6–15 CONCRETE, REAL services or products actually offered. NEVER include city/location names (e.g. Brussel, Gent), generic navigation labels ("Our services", "Service areas", "About us", "Contact"), or marketing headlines/slogans as items!
-3. If this is a SERVICE business: EVERY review sentence MUST sound like a real client who booked an appointment / intervention — include concrete details of (a) what problem the customer experienced, (b) what the technician/specialist actually did (STRICTLY matching ONLY what this specific business offers — NEVER invent out-of-context trades, tools, or repairs!), (c) how the appointment went, (d) whether the problem was resolved, (e) 1–2 personal observations, and mention the SPECIFIC company name in several sentences so reviews clearly belong to this company and not any generic company. STRICTLY FORBIDDEN words for service businesses: "bought", "ordered", "shipping", "delivery", "box", "packaging", "colis", "emballage", "cet article", "dit artikel", "cadeau", "product photos", "swap variant".
-4. Classify into 2–4 clean categories, generate categoryContext + full 5..1 star languagePacks per language. Keep low-star reviews benign (no scam/fraud claims). Use ONLY placeholders {product}, {contextA}, {contextB}, {duration}, {timeframe}.`;
+1. Determine accurately if this is a "service" business or an "ecommerce" store, and infer "detectedCountryCode" (ISO-2 like BE, NL, FR, DE, GB, MA, CH, US).
+2. Extract 6–14 CONCRETE, REAL services or products actually offered. NEVER include website headings, process steps ("Tell us what you need", "How it works"), slogans ("Care that suits your home"), navigation hubs ("Our services", "Solutions", "Service areas", "About us", "Contact"), CTAs ("Book now"), or city pages! Assign specific categories distinguishing Maintenance, Repair, Installation, Plumbing/Leaks, Emergency, and Heat Pumps/Equipment.
+3. Generate "offeringContexts" per slug and language with a natural "localizedName" in THAT exact language (zero untranslated English labels in FR/NL/DE/ES/AR!), "distinctiveKeywords", and 3–4 offering-accurate "scenarios", "actions", and "outcomes" (never mix maintenance with emergency repair or installation!).
+4. Plain customer voice: ZERO artificial spelling mistakes, ZERO marketing clichés ("exceeded expectations", "worth every penny", "game-changer"), ZERO e-commerce shipping/box words on service businesses, and keep 3★ neutral/mixed and 1–2★ honest scheduling/communication friction. Ensure tokens.contextA/contextB are lowercase noun phrases.`;
 
         const aiResult = await generateJsonWithAI<WorkerParsedScan>(body?.aiConfig, env, {
           systemInstruction:
-            'You are a multilingual business research and customer-experience copywriter who scans company websites, maps their real services or products, and writes authentic customer review building blocks.',
+            'You are a multilingual business research and customer-experience specialist who extracts only genuine services/products and writes natural, domain-accurate review building blocks.',
           prompt,
           jsonShapeHint: SCAN_WEBSITE_JSON_HINT,
         });
@@ -313,6 +324,12 @@ CRITICAL RULES:
       (parsed?.productClassifications || []).map((c) => [c.item_slug.toLowerCase(), c])
     );
 
+    const filteredAiItems = (parsed?.discoveredItems || []).filter((it) =>
+      isValidOfferingName(String(it.item_name || ''), String(it.item_slug || ''))
+    );
+    const rawChosenItems = filteredAiItems.length > 0 ? filteredAiItems : heuristicItems;
+    const seenSlugs = new Set<string>();
+
     const products =
       shopify.length > 0
         ? shopify.map((p) => {
@@ -323,16 +340,25 @@ CRITICAL RULES:
               category: cls?.category?.trim() || p.category,
             };
           })
-        : (parsed?.discoveredItems?.length ? parsed.discoveredItems : heuristicItems).slice(0, 30).map((item, idx) => {
-            const slug = slugifySafe(item.item_slug || item.item_name, idx + 1);
-            return {
-              item_id: String(idx + 1),
-              item_slug: slug,
-              item_name: String(item.item_name || slug).trim(),
-              category: String(item.category || 'Services').trim(),
-              product_url: sanitizeHttpUrl(item.product_url, origin, slug),
-            };
-          });
+        : rawChosenItems
+            .filter((item) => {
+              const slug = slugifySafe(item.item_slug || item.item_name, 1);
+              if (seenSlugs.has(slug)) return false;
+              seenSlugs.add(slug);
+              return true;
+            })
+            .slice(0, 24)
+            .map((item, idx) => {
+              const slug = slugifySafe(item.item_slug || item.item_name, idx + 1);
+              const cleanName = String(item.item_name || slug).trim();
+              return {
+                item_id: String(idx + 1),
+                item_slug: slug,
+                item_name: cleanName,
+                category: inferAccurateCategory(cleanName, slug, String(item.category || '').trim()),
+                product_url: sanitizeHttpUrl(item.product_url, origin, slug),
+              };
+            });
 
     if (products.length === 0) {
       return json(
@@ -356,11 +382,17 @@ CRITICAL RULES:
         ? `${detectedName} (${isEcommerce ? 'E-commerce' : 'Service business'}) — ${metaDesc.slice(0, 220)}`
         : `${detectedName} — ${isEcommerce ? 'Online store' : 'Service business'} offering ${uniqueCats.join(', ')} (${sampleOfferings.join(', ')}).`);
 
+    const builtProfile = buildBusinessProfile(rawPages, {
+      name: detectedName,
+      summary: parsed?.businessSummary,
+    });
+    const resolvedCountry =
+      (parsed?.detectedCountryCode || '').trim().toUpperCase() ||
+      builtProfile.detectedCountryCode ||
+      undefined;
+
     return json({
-      businessProfile: buildBusinessProfile(rawPages, {
-        name: detectedName,
-        summary: parsed?.businessSummary,
-      }),
+      businessProfile: { ...builtProfile, detectedCountryCode: resolvedCountry },
       scannedUrl: home.finalUrl.toString(),
       hostname: home.finalUrl.hostname,
       scannedPagesCount: Math.max(1, pages.length),
@@ -371,14 +403,24 @@ CRITICAL RULES:
       aiUsage,
       detectedBusinessName: detectedName,
       detectedBusinessSummary: detectedSummary,
+      detectedCountryCode: resolvedCountry,
       products,
       pack: parsed?.languagePacks
         ? {
             detectedBusinessName: parsed.detectedBusinessName || home.finalUrl.hostname,
             businessSummary: parsed.businessSummary || '',
+            detectedCountryCode: resolvedCountry,
             productClassifications: parsed.productClassifications || [],
+            offeringContexts: parsed.offeringContexts || [],
             categoryContext: parsed.categoryContext || [],
             languagePacks: parsed.languagePacks,
+          }
+        : resolvedCountry
+        ? {
+            detectedBusinessName: detectedName,
+            businessSummary: detectedSummary,
+            detectedCountryCode: resolvedCountry,
+            languagePacks: [],
           }
         : null,
     });
@@ -388,7 +430,12 @@ CRITICAL RULES:
 }
 
 async function handleDetectReviews(req: Request, env: Env): Promise<Response> {
-  let body: { reviews?: ReviewAuditInput[]; businessContext?: string; aiConfig?: AIConfigPayload };
+  let body: {
+    reviews?: ReviewAuditInput[];
+    businessContext?: string;
+    validOfferings?: ValidOfferingOption[];
+    aiConfig?: AIConfigPayload;
+  };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -404,7 +451,8 @@ async function handleDetectReviews(req: Request, env: Env): Promise<Response> {
       body?.aiConfig,
       env,
       reviews,
-      typeof body?.businessContext === 'string' ? body.businessContext.slice(0, 400) : ''
+      typeof body?.businessContext === 'string' ? body.businessContext.slice(0, 500) : '',
+      Array.isArray(body?.validOfferings) ? body.validOfferings.slice(0, 40) : undefined
     );
     return json({ results, aiUsage: usage });
   } catch (e) {
@@ -413,7 +461,14 @@ async function handleDetectReviews(req: Request, env: Env): Promise<Response> {
 }
 
 async function handleRewriteReviews(req: Request, env: Env): Promise<Response> {
-  let body: { reviews?: ReviewAuditInput[]; businessContext?: string; aiConfig?: AIConfigPayload };
+  let body: {
+    reviews?: ReviewAuditInput[];
+    businessContext?: string;
+    validOfferings?: ValidOfferingOption[];
+    avoidOpenings?: string[];
+    detectedCountryCode?: string;
+    aiConfig?: AIConfigPayload;
+  };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -429,7 +484,12 @@ async function handleRewriteReviews(req: Request, env: Env): Promise<Response> {
       body?.aiConfig,
       env,
       reviews,
-      typeof body?.businessContext === 'string' ? body.businessContext.slice(0, 400) : ''
+      typeof body?.businessContext === 'string' ? body.businessContext.slice(0, 500) : '',
+      {
+        validOfferings: Array.isArray(body?.validOfferings) ? body.validOfferings.slice(0, 40) : undefined,
+        avoidOpenings: Array.isArray(body?.avoidOpenings) ? body.avoidOpenings.slice(0, 30) : undefined,
+        detectedCountryCode: typeof body?.detectedCountryCode === 'string' ? body.detectedCountryCode.slice(0, 6) : undefined,
+      }
     );
     return json({ rewrites, aiUsage: usage });
   } catch (e) {

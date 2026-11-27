@@ -1,167 +1,421 @@
-import { CatalogProduct, ReviewLanguage } from '../types/reviews';
+import {
+  CatalogProduct,
+  OfferingVoiceContext,
+  ReviewLanguage,
+} from '../types/reviews';
 
 function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+export type ServiceSubArchetype =
+  | 'heat_pump'
+  | 'boiler_maintenance'
+  | 'boiler_install'
+  | 'boiler_repair'
+  | 'heating_system'
+  | 'water_heater'
+  | 'leak_repair'
+  | 'plumbing_install'
+  | 'emergency'
+  | 'electrical'
+  | 'cleaning'
+  | 'clinical'
+  | 'beauty'
+  | 'digital'
+  | 'advisory'
+  | 'general_service';
+
 /**
- * Generates a concrete, service-matched micro-detail sentence based on the exact offering name/slug
- * so a boiler repair review mentions heating/hot water, a leak repair mentions pipes/water damage, etc.
+ * Universal offering sub-type classifier (works across any industry without hardcoding).
+ * Strictly separates Maintenance, Installation, Repair, Heating Systems, Water Heaters,
+ * Leak Detection, Plumbing Installation, Emergency Callouts, and Heat Pumps/Renewables,
+ * as well as Clinical, Beauty, Electrical, Cleaning, Digital, and Advisory services.
+ */
+export function classifyServiceArchetype(product: CatalogProduct): ServiceSubArchetype {
+  const itemText = `${product.item_name} ${product.item_slug}`.toLowerCase();
+  const fullText = `${itemText} ${product.category}`.toLowerCase();
+
+  if (/\b(heat[- ]?pumps?|warmtepomp\w*|pompes?[- ]a[- ]chaleur|pompe[- ]à[- ]chaleur|geotherm\w*|hybrid[- ]heat\w*|solar|zonnepane\w*)\b/i.test(itemText)) {
+    return 'heat_pump';
+  }
+  if (/\b(emergenc\w*|urgent\w*|spoed\w*|d[eé]pannage|24\/7|notdienst)\b/i.test(itemText)) {
+    return 'emergency';
+  }
+  if (/\b(leak\w*|waterlek\w*|lekdetect\w*|fuites?|unblock\w*|drain\w*|ontstop\w*|d[eé]bouch\w*|sewer|riool\w*)\b/i.test(itemText)) {
+    return 'leak_repair';
+  }
+  if (/\b(water[- ]?heaters?|hot[- ]?water|warm[- ]?water|chauffe[- ]?eau|sanitair[- ]?warm\w*|boiler[- ]?tank)\b/i.test(itemText)) {
+    return 'water_heater';
+  }
+  if (/\b(plumb\w*|plomb\w*|loodgieter\w*|sanitair\w*|sanitary|tap|faucet|toilet|sink|bathroom|badkamer)\b/i.test(itemText)) {
+    return 'plumbing_install';
+  }
+  if (/\b(maintenance|entretien|onderhoud\w*|service[- ]?plan|inspection|check[- ]?up|tune[- ]?up|keuring\w*|attest\w*)\b/i.test(itemText)) {
+    return /\b(boiler|ketel|chaudi[eè]re|heat\w*|chauffage|verwarming|hvac|bulex|vaillant|viessmann)\b/i.test(fullText)
+      ? 'boiler_maintenance'
+      : 'general_service';
+  }
+  if (/\b(install\w*|replace\w*|vervang\w*|plaatsing|nieuwe[- ]verwarming|montage|pose|gas[- ]?boilers?|condens\w*)\b/i.test(itemText)) {
+    return /\b(boiler|ketel|chaudi[eè]re|heat\w*|chauffage|verwarming|gas|bulex|vaillant|viessmann)\b/i.test(fullText)
+      ? 'boiler_install'
+      : 'general_service';
+  }
+  if (/\b(heating[- ]?systems?|central[- ]?heating|radiator\w*|thermostat\w*|underfloor|vloerverwarming)\b/i.test(itemText)) {
+    return 'heating_system';
+  }
+  if (/\b(boiler|ketel|chaudi[eè]re|heating|chauffage|verwarming|herstelling|r[eé]paration|hvac)\b/i.test(itemText)) {
+    return 'boiler_repair';
+  }
+  if (/\b(electr\w*|wiring|panel|breaker|outlet|lighting|ev[- ]?charger|laadpaal)\b/i.test(fullText)) {
+    return 'electrical';
+  }
+  if (/\b(clean\w*|nettoyage|schoonmaak|carpet|window|maid|housekeep\w*)\b/i.test(fullText)) {
+    return 'cleaning';
+  }
+  if (/\b(dental|dentist|implant\w*|whitening|orthodont\w*|clinic|medical|physio\w*|osteopath\w*|therapy|dermatol\w*)\b/i.test(fullText)) {
+    return 'clinical';
+  }
+  if (/\b(hair\w*|salon|barber|facial|massage|manicure|pedicure|lash\w*|brow\w*|spa|waxing)\b/i.test(fullText)) {
+    return 'beauty';
+  }
+  // Strictly digital/tech terms — NEVER match generic "consultation" or "solutions"!
+  if (/\b(seo|web[- ]?design|website|ppc|google[- ]?ads|branding|social[- ]?media|devops|cloud|saas|software|app[- ]?dev)\b/i.test(itemText)) {
+    return 'digital';
+  }
+  if (/\b(legal|lawyer|attorney|notary|tax|accounting|bookkeep\w*|payroll)\b/i.test(fullText)) {
+    return 'advisory';
+  }
+  return 'general_service';
+}
+
+/**
+ * Returns a natural, pure-target-language noun phrase for an offering so we NEVER paste
+ * untranslated foreign service titles (like "Heat pumps" or "Water Heaters & Hot Water")
+ * into French, Dutch, German, Spanish, or Arabic sentences, nor awkward labels into English.
+ */
+export function getLocalizedOfferingPhrase(
+  product: CatalogProduct,
+  language: ReviewLanguage,
+  offeringCtx?: OfferingVoiceContext | null
+): string {
+  if (offeringCtx?.localizedName?.trim()) {
+    return offeringCtx.localizedName.trim();
+  }
+  const arch = classifyServiceArchetype(product);
+  const map: Record<ServiceSubArchetype, Partial<Record<ReviewLanguage, string>>> = {
+    heat_pump: {
+      en: 'our heat pump installation',
+      fr: 'notre pompe à chaleur',
+      nl: 'onze warmtepomp',
+      de: 'unsere Wärmepumpe',
+      es: 'nuestra bomba de calor',
+      ar: 'المضخة الحرارية',
+      darija_latin: 'la pompe à chaleur',
+    },
+    boiler_maintenance: {
+      en: 'our annual boiler service',
+      fr: 'l’entretien annuel de notre chaudière',
+      nl: 'het onderhoud van onze verwarmingsketel',
+      de: 'die jährliche Heizungswartung',
+      es: 'el mantenimiento anual de la caldera',
+      ar: 'الصيانة الدورية للغلاية',
+    },
+    boiler_install: {
+      en: 'our new condensing boiler installation',
+      fr: 'l’installation de notre nouvelle chaudière',
+      nl: 'de plaatsing van onze nieuwe condensatieketel',
+      de: 'den Einbau unseres neuen Heizkessels',
+      es: 'la instalación de nuestra nueva caldera',
+      ar: 'تركيب الغلاية الجديدة',
+    },
+    boiler_repair: {
+      en: 'our boiler repair',
+      fr: 'la réparation de notre chaudière',
+      nl: 'de herstelling van onze verwarmingsketel',
+      de: 'die Heizungsreparatur',
+      es: 'la reparación de la caldera',
+      ar: 'إصلاح عطل التدفئة',
+    },
+    heating_system: {
+      en: 'our central heating system',
+      fr: 'notre chauffage central',
+      nl: 'onze centrale verwarming',
+      de: 'unsere Zentralheizung',
+      es: 'nuestro sistema de calefacción',
+    },
+    water_heater: {
+      en: 'our hot water heater',
+      fr: 'notre chauffe-eau',
+      nl: 'onze warmwaterboiler',
+      de: 'unseren Warmwasserbereiter',
+      es: 'nuestro calentador de agua',
+    },
+    leak_repair: {
+      en: 'a water leak repair',
+      fr: 'une réparation de fuite d’eau',
+      nl: 'het herstellen van een waterlek',
+      de: 'eine Wasserleck-Reparatur',
+      es: 'la reparación de una fuga de agua',
+    },
+    plumbing_install: {
+      en: 'our sanitary plumbing work',
+      fr: 'nos travaux de plomberie sanitaire',
+      nl: 'onze sanitaire leidingwerken',
+      de: 'unsere Sanitärinstallation',
+      es: 'nuestra instalación de fontanería',
+    },
+    emergency: {
+      en: 'an urgent callout',
+      fr: 'un dépannage en urgence',
+      nl: 'een dringende interventie',
+      de: 'einen dringenden Notdienst-Einsatz',
+      es: 'una intervención de urgencia',
+    },
+    electrical: {
+      en: 'our electrical work',
+      fr: 'nos travaux électriques',
+      nl: 'onze elektriciteitswerken',
+      de: 'unsere Elektroarbeiten',
+    },
+    cleaning: {
+      en: 'our deep cleaning session',
+      fr: 'notre prestation de nettoyage',
+      nl: 'onze grondige schoonmaakbeurt',
+      de: 'unsere Grundreinigung',
+    },
+    clinical: {
+      en: 'my appointment',
+      fr: 'mon rendez-vous au cabinet',
+      nl: 'mijn afspraak in de praktijk',
+      de: 'meinen Praxistermin',
+    },
+    beauty: {
+      en: 'my salon appointment',
+      fr: 'mon soin au salon',
+      nl: 'mijn behandeling in het salon',
+      de: 'meine Behandlung im Studio',
+    },
+    digital: {
+      en: 'our project',
+      fr: 'notre projet digital',
+      nl: 'ons digitale traject',
+      de: 'unser Digitalprojekt',
+    },
+    advisory: {
+      en: 'our consultation',
+      fr: 'notre dossier',
+      nl: 'ons adviesgesprek',
+      de: 'unsere Beratung',
+    },
+    general_service: {
+      en: 'this appointment',
+      fr: 'cette intervention',
+      nl: 'deze interventie',
+      de: 'diesen Termin',
+      es: 'este servicio',
+      ar: 'هذه الخدمة',
+      darija_latin: 'had l-khedma',
+    },
+  };
+  return map[arch]?.[language] || map.general_service[language] || 'this service';
+}
+
+/**
+ * Generates an offering-accurate detail sentence strictly matching the sub-service.
  */
 export function getServiceSpecificSentence(
   product: CatalogProduct,
   language: ReviewLanguage,
-  stars: number
+  stars: number,
+  offeringCtx?: OfferingVoiceContext | null
 ): string | null {
-  const haystack = `${product.item_name} ${product.item_slug} ${product.category}`.toLowerCase();
-
-  // Negative/mixed reviews stay focused on scheduling/expectations rather than praising fixes
   if (stars <= 2) return null;
 
-  // 1. Boiler / Heating / Heat Pump / Hot Water
-  if (/boiler|heat|chauffage|verwarming|ketel|warm|hot water|bulex|vaillant|radiator|thermostat/i.test(haystack)) {
-    const pool: Partial<Record<ReviewLanguage, string[]>> = {
-      en: [
-        'Hot water and radiators were back to normal before he even packed up his tools.',
-        'Checked the boiler pressure, swapped the worn valve, and tested the heating twice.',
-        'Our heating had been cutting out all week and now it runs quietly and steadily.',
-        'Explained what caused the error code on our boiler so we know what to watch for.',
-      ],
-      fr: [
-        'L’eau chaude et les radiateurs refonctionnaient normalement avant même qu’il ne reparte.',
-        'Il a vérifié la pression de la chaudière, remplacé la pièce usée et tout testé.',
-        'Le chauffage ne s’arrête plus tout seul, tout tourne enfin sans bruit.',
-        'Diagnostic précis sur le code d’erreur de la chaudière, rien à redire.',
-      ],
-      nl: [
-        'Warm water en de radiatoren werkten meteen weer normaal nog voor hij vertrok.',
-        'Keteldruk nagekeken, versleten onderdeel vervangen en de verwarming rustig getest.',
-        'De ketel viel al dagen uit maar draait nu weer stil en stabiel.',
-        'Duidelijke uitleg gekregen over de foutcode op onze ketel.',
-      ],
-      de: [
-        'Warmwasser und Heizkörper liefen wieder normal, noch bevor er sein Werkzeug eingepackt hatte.',
-        'Heizungsdruck geprüft, defektes Ventil getauscht und alles sauber entlüftet.',
-      ],
-    };
-    const list = pool[language] || pool.en!;
-    return pick(list);
+  if (offeringCtx?.actions?.length) {
+    return pick(offeringCtx.actions);
   }
 
-  // 2. Water Leak / Pipe / Drain / Plumbing
-  if (/leak|lek|fuite|plumb|plombier|loodgieter|pipe|drain|sink|toilet|tap|faucet|water/i.test(haystack)) {
-    const pool: Partial<Record<ReviewLanguage, string[]>> = {
+  const arch = classifyServiceArchetype(product);
+
+  const banks: Partial<Record<ServiceSubArchetype, Partial<Record<ReviewLanguage, string[]>>>> = {
+    boiler_repair: {
       en: [
-        'Found the hidden leak under the sink quickly without tearing up the cabinet.',
-        'Replaced the leaking joint and checked water pressure across every tap before leaving.',
-        'Stopped the drip right away and saved us from serious water damage.',
-        'Clean pipework, zero mess left on the bathroom floor.',
+        'He traced the pressure drop to a worn expansion vessel valve, replaced it on the spot, and tested every radiator.',
+        'The technician cleared the ignition lockout, swapped out the faulty sensor, and verified steady hot water before leaving.',
+        'Diagnosed the error code within fifteen minutes and had the heating running quietly again the same afternoon.',
       ],
       fr: [
-        'Il a repéré la fuite sous l’évier rapidement sans abîmer le meuble.',
-        'Joint remplacé et pression vérifiée sur tous les robinets avant de partir.',
-        'Fuite stoppée net, ça nous a évité un gros dégât des eaux.',
-        'Travail de plomberie propre, aucune trace laissée dans la salle de bain.',
+        'Il a identifié la baisse de pression sur le vase d’expansion, remplacé la soupape usée et relancé la chaudière proprement.',
+        'Diagnostic rapide sur le code d’erreur : capteur remplacé dans la foulée et chauffage testé sur tout l’étage.',
+        'La panne d’allumage a été réglée dès le premier passage sans pousser au remplacement complet.',
       ],
       nl: [
-        'Het lek onder de gootsteen snel gevonden zonder de kast te beschadigen.',
-        'Lekkende koppeling vervangen en alle kranen nog eens gecontroleerd.',
-        'Het lek was direct gestopt, blij dat we waterschade hebben vermeden.',
-        'Netjes gewerkt aan de leidingen en de badkamer schoon achtergelaten.',
+        'Hij vond meteen de oorzaak van het drukverlies, verving de versleten klep en testte nadien zowel het warme water als de verwarming.',
+        'De foutcode op de ketel werd snel uitgelezen en met een nieuwe ontstekingselektrode draait alles weer rustig.',
+        'Binnen het uur was de storing verholpen zonder onnodige vervanging van onderdelen.',
       ],
-      de: [
-        'Das Leck unter dem Waschbecken wurde schnell gefunden und sauber abgedichtet.',
-        'Alle Anschlüsse geprüft und das Bad komplett sauber hinterlassen.',
-      ],
-    };
-    const list = pool[language] || pool.en!;
-    return pick(list);
-  }
-
-  // 3. Emergency / Urgent / 24/7
-  if (/emergenc|urgent|dringend|dépannage|depannage|24\/7|spoed|notdienst/i.test(haystack)) {
-    const pool: Partial<Record<ReviewLanguage, string[]>> = {
+    },
+    boiler_maintenance: {
       en: [
-        'Answered on the first ring and had someone at our door much faster than expected.',
-        'Huge relief having an emergency technician actually show up when promised.',
-        'Sorted the urgent issue out the same evening with no crazy surcharge.',
+        'He cleaned the burner assembly, checked flue gas readings, and handed over the official maintenance certificate right after.',
+        'Thorough statutory inspection: seals checked, heat exchanger cleaned, and water pressure adjusted to 1.5 bar.',
+        'Took the time to inspect every safety component during the annual tune-up and left the utility room spotless.',
       ],
       fr: [
-        'Ils ont décroché tout de suite et un dépanneur était là bien plus vite que prévu.',
-        'Quel soulagement de tomber sur un service d’urgence qui tient vraiment ses horaires.',
-        'Souci urgent réglé le soir même sans tarif abusif.',
+        'Nettoyage complet du brûleur, contrôle de combustion et remise immédiate de l’attestation d’entretien réglementaire.',
+        'Entretien périodique fait sérieusement : corps de chauffe nettoyé, pression ajustée et réglages vérifiés.',
+        'Le chauffagiste a tout contrôlé méthodiquement et m’a remis le certificat officiel en fin de visite.',
       ],
       nl: [
-        'Direct opgenomen aan de telefoon en sneller ter plaatse dan verwacht.',
-        'Echt een opluchting bij een dringend probleem als iemand ook echt op tijd komt.',
-        'Dezelfde avond nog opgelost zonder overdreven spoedkosten.',
+        'De brander werd grondig gereinigd, de rookgassen gecontroleerd en ik kreeg meteen het officiële reinigingsattest mee.',
+        'Tweejaarlijks ketelonderhoud netjes uitgevoerd met controle van alle dichtingen en een zuiniger afgestelde ketel.',
+        'Zorgvuldig onderhoud volgens de regels in België, inclusief keuringsverslag en heldere tips.',
       ],
-    };
-    const list = pool[language] || pool.en!;
-    return pick(list);
-  }
-
-  // 4. Installation / Setup
-  if (/install|setup|montage|plaatsing|pose/i.test(haystack)) {
-    const pool: Partial<Record<ReviewLanguage, string[]>> = {
+    },
+    boiler_install: {
       en: [
-        'The new installation looks super neat and they walked us through all the controls.',
-        'Everything was fitted cleanly on the scheduled day and tested thoroughly.',
+        'The old unit was removed cleanly, the new condensing boiler and flue were fitted neatly, and they walked us through the thermostat.',
+        'From sizing advice on the quote to commissioning the new condensing boiler, the pipework and finish look genuinely tidy.',
+        'Installed our replacement gas condensing unit in a single day and hauled away the old appliance.',
       ],
       fr: [
-        'La nouvelle installation est très propre et ils nous ont bien montré comment tout régler.',
-        'Pose terminée dans les temps et vérifiée de fond en comble.',
+        'Dépose de l’ancienne chaudière, pose du nouveau modèle à condensation et paramétrage du thermostat réalisés proprement sur la journée.',
+        'Les raccords cuivre et l’évacuation des fumées sont impeccables, avec une mise en route expliquée étape par étape.',
+        'Devis clair pour le remplacement de notre vieille installation et chantier laissé parfaitement propre le soir même.',
       ],
       nl: [
-        'De nieuwe installatie ziet er heel strak uit en alles werd duidelijk uitgelegd.',
-        'Alles netjes geplaatst op de afgesproken dag en grondig getest.',
+        'Onze verouderde ketel werd op één dag vlot vervangen door een nieuwe gascondensatieketel, inclusief nette afwerking van de rookgasafvoer.',
+        'Heldere uitleg bij de offerte en na de plaatsing namen ze rustig de tijd om de slimme thermostaat samen in te stellen.',
+        'Strak leidingwerk in de berging en het oude toestel werd meteen netjes meegenomen.',
       ],
-    };
-    const list = pool[language] || pool.en!;
-    return pick(list);
-  }
+    },
+    heating_system: {
+      en: [
+        'He bled the upstairs loop, balanced the radiator lockshield valves, and every room now heats up evenly.',
+        'Replaced two stuck thermostatic radiator valves and calibrated the zone thermostat so the top floor finally stays warm.',
+      ],
+      fr: [
+        'Purge complète du circuit, équilibrage des radiateurs à l’étage et remplacement de deux vannes thermostatiques grippées.',
+        'La chaleur se répartit enfin uniformément dans toutes les pièces depuis le réglage du circulateur.',
+      ],
+      nl: [
+        'Het hele verwarmingscircuit werd ontlucht en de thermostatische kranen boven zijn opnieuw ingeregeld zodat elke kamer gelijkmatig opwarmt.',
+        'Na het bijregelen van de circulatiepomp worden ook de radiatoren op zolder eindelijk weer goed warm.',
+      ],
+    },
+    water_heater: {
+      en: [
+        'Descaled the hot water cylinder, replaced the dripping safety group, and water temperature is steady again.',
+        'Installed the replacement domestic water heater cleanly and verified hot water flow at both bathroom taps.',
+      ],
+      fr: [
+        'Détartrage complet du chauffe-eau et remplacement du groupe de sécurité qui gouttait : l’eau chaude est revenue aussitôt.',
+        'Le nouveau ballon d’eau chaude chauffe vite et silencieusement, avec des raccords bien propres.',
+      ],
+      nl: [
+        'De warmwaterboiler werd grondig ontkalkt en de lekkende veiligheidsgroep vervangen; we hebben weer volop warm water in de douche.',
+        'Vlotte plaatsing van het nieuwe warmwatertoestel met nette aansluiting op de bestaande leidingen.',
+      ],
+    },
+    leak_repair: {
+      en: [
+        'Located the seepage behind the kitchen cabinet without breaking tiles, fitted a new compression joint, and pressure-tested the line.',
+        'Replaced the cracked trap and supply seal under the basin cleanly, avoiding water damage to the floor.',
+      ],
+      fr: [
+        'Fuite localisée précisément sur le raccord encastré sans tout casser, joint refait et test d’étanchéité validé.',
+        'Le plombier a remplacé le siphon fendu et le flexible sous l’évier en laissant le meuble sec et propre.',
+      ],
+      nl: [
+        'Het lek aan de leiding werd zonder breekwerk opgespoord, vakkundig gedicht en meteen op druk getest.',
+        'Gebarsten koppeling onder de wastafel snel vervangen voor er waterschade aan de vloer kon ontstaan.',
+      ],
+    },
+    plumbing_install: {
+      en: [
+        'Fitted the new bathroom mixer taps, shutoff valves, and drain connections neatly with everything level and watertight.',
+        'Completed the kitchen supply and waste pipework cleanly ahead of our cabinet fitting.',
+      ],
+      fr: [
+        'Pose soignée de la nouvelle robinetterie, des vannes d’arrêt et des évacuations dans notre salle de bain rénovée.',
+        'Les arrivées d’eau et évacuations de la cuisine ont été installées au millimètre et testées sous pression.',
+      ],
+      nl: [
+        'Nieuwe mengkranen, stopkranen en afvoerleidingen in de badkamer keurig geplaatst en meteen op dichtheid gecontroleerd.',
+        'Alle aan- en afvoerleidingen voor onze nieuwe keuken strak volgens plan aangelegd.',
+      ],
+    },
+    heat_pump: {
+      en: [
+        'They ran a proper heat-loss calculation beforehand, positioned the outdoor unit quietly away from the patio, and tuned the heating curve.',
+        'Clear guidance on hybrid heat pump sizing for our insulated home, followed by a clean two-day installation.',
+      ],
+      fr: [
+        'Étude thermique sérieuse avant devis, unité extérieure posée discrètement et loi d’eau réglée avec soin pour notre plancher chauffant.',
+        'Accompagnement clair sur le dimensionnement de la pompe à chaleur air-eau et mise en service très silencieuse.',
+      ],
+      nl: [
+        'Vooraf een eerlijke warmteverliesberekening gekregen, buitenunit stil geplaatst en de stooklijn netjes afgesteld op onze vloerverwarming.',
+        'Duidelijk advies over een hybride warmtepomp voor onze woning en een heel verzorgde oplevering.',
+      ],
+    },
+    emergency: {
+      en: [
+        'Picked up right away in the evening, arrived within two hours, and isolated the fault safely with transparent callout pricing.',
+        'Came out the same Saturday afternoon when we had zero hot water and got us running again without inflated emergency fees.',
+      ],
+      fr: [
+        'Réponse téléphonique immédiate un soir de semaine, arrivée en moins de deux heures et dépannage efficace au tarif annoncé.',
+        'Déplacement rapide en urgence le samedi après-midi pour sécuriser l’installation et rétablir l’eau chaude.',
+      ],
+      nl: [
+        'S avonds meteen iemand aan de lijn gekregen, binnen twee uur stond de technieker binnen en was het acute probleem veilig verholpen.',
+        'Snelle spoedinterventie op zaterdag zonder verrassingen op de factuur achteraf.',
+      ],
+    },
+  };
 
-  return null;
+  const list = banks[arch]?.[language] || banks[arch]?.en;
+  return list && list.length > 0 ? pick(list) : null;
 }
 
 /**
- * Ultra-short, realistic human-typed reviews (~15% of dataset) — real people often write 3–10 words on their phone.
+ * Concise, natural 1-sentence human reviews (~15% of dataset) — zero mechanical service-label pasting!
  */
 export function buildUltraShortReview(
   product: CatalogProduct,
   language: ReviewLanguage,
   stars: 1 | 2 | 3 | 4 | 5,
-  serviceMode: boolean
+  serviceMode: boolean,
+  offeringCtx?: OfferingVoiceContext | null
 ): { subject: string; body: string } | null {
-  const name = product.item_name;
+  const localPhrase = getLocalizedOfferingPhrase(product, language, offeringCtx);
 
   if (serviceMode) {
     if (stars === 5) {
       const pool: Partial<Record<ReviewLanguage, Array<[string, string]>>> = {
         en: [
-          ['Quick & clean', `Fixed ${name} same day, super polite guy`],
-          ['Top service', 'On time, fair price, problem solved.'],
-          ['Recommended', `Great job with ${name}, zero mess left behind.`],
-          ['fast fix', 'arrived in 2 hrs and sorted it out fast thx'],
-          ['5 stars', `Very happy with ${name}. Will call again.`],
+          ['Punctual and tidy', `Arrived right on time for ${localPhrase} and left everything spotless.`],
+          ['Clear quote, clean work', 'Fair price agreed upfront, polite technician, and everything works properly now.'],
+          ['Sorted on the first visit', 'Quick diagnosis, clear explanation, and no mess left behind.'],
+          ['Reliable local team', `Handled ${localPhrase} smoothly from booking to completion.`],
         ],
         fr: [
-          ['Nickel', `Intervention rapide pour ${name}, travail propre.`],
-          ['Top', 'Ponctuel, sympa et prix correct.'],
-          ['Merci !', `tres efficace pour ${name}, je recommande`],
-          ['Impeccable', 'Passé le jour même, problème réglé en 30 min.'],
-          ['Sérieux', 'Bon technicien, rien a redire'],
+          ['Ponctuel et soigné', `Horaire respecté pour ${localPhrase} et travail laissé parfaitement propre.`],
+          ['Devis respecté', 'Technicien courtois, tarif annoncé à l’avance et intervention efficace.'],
+          ['Réglé du premier coup', 'Diagnostic clair sur place et exécution rapide sans mauvaise surprise.'],
+          ['Sérieux et efficace', `Très bon suivi pour ${localPhrase}, rien à redire.`],
         ],
         nl: [
-          ['Top service', `Snel opgelost (${name}), heel vriendelijke man.`],
-          ['Prima!', 'Op tijd, eerlijke prijs en netjes gewerkt'],
-          ['Aanrader', `${name} vlot in orde gebracht, bedankt!`],
-          ['Goed werk', 'binnen paar uur opgelost, super tevreden'],
-          ['Vlot geregeld', 'Nette vakman, alles werkt weer.'],
+          ['Stipt en verzorgd', `Netjes op tijd gekomen voor ${localPhrase} en alles proper achtergelaten.`],
+          ['Correcte prijsafspraak', 'Vriendelijke vakman, duidelijke uitleg vooraf en vlot afgewerkt.'],
+          ['Meteen in orde', 'Rustige aanpak, eerlijk advies en meteen goed opgelost bij het eerste bezoek.'],
+          ['Betrouwbare vakman', `Heel vlotte afhandeling voor ${localPhrase}.`],
         ],
         de: [
-          ['Top!', `Schnell erledigt (${name}), sehr sauber gearbeitet.`],
-          ['Sehr zufrieden', 'Pünktlich, freundlich und fairer Preis.'],
+          ['Pünktlich und sauber', `Zuverlässiger Termin für ${localPhrase} und faire Abrechnung.`],
+          ['Klare Empfehlung', 'Freundlicher Techniker, saubere Ausführung und transparenter Preis.'],
         ],
       };
       const items = pool[language] || pool.en!;
@@ -171,16 +425,16 @@ export function buildUltraShortReview(
     if (stars === 4) {
       const pool: Partial<Record<ReviewLanguage, Array<[string, string]>>> = {
         en: [
-          ['Good job', `${name} done properly, arrived 20 mins late tho.`],
-          ['Solid work', 'Good technician and fair quote.'],
+          ['Good work overall', `Solid job on ${localPhrase}, even if arrival was about twenty minutes past the window.`],
+          ['Competent technician', 'Workmanship was clean and the quote stayed fair; booking took a couple of days.'],
         ],
         fr: [
-          ['Bon travail', `${name} bien fait, juste un petit retard a l'arrivee.`],
-          ['Satisfait', 'Travail propre et devis respecté.'],
+          ['Bon travail dans l’ensemble', `Prestation sérieuse pour ${localPhrase}, malgré un léger retard annoncé par téléphone.`],
+          ['Intervention propre', 'Travail soigné et tarif respecté, juste un petit délai pour obtenir un créneau.'],
         ],
         nl: [
-          ['Goed geholpen', `${name} netjes gedaan, iets later dan gepland.`],
-          ['Tevreden', 'Goede service voor een correcte prijs.'],
+          ['Degelijk uitgevoerd', `Goed geholpen voor ${localPhrase}, al liep het geplande tijdslot een halfuurtje uit.`],
+          ['Tevreden over het vakwerk', 'Keurig werk geleverd tegen de afgesproken prijs, enkel even wachten op een vrij moment.'],
         ],
       };
       const items = pool[language] || pool.en!;
@@ -189,9 +443,9 @@ export function buildUltraShortReview(
     }
     if (stars === 3) {
       const pool: Partial<Record<ReviewLanguage, Array<[string, string]>>> = {
-        en: [['Okay overall', `Work on ${name} was fine, took a while to get a slot.`]],
-        fr: [['Correct', `Travail correct pour ${name}, un peu long pour le rdv.`]],
-        nl: [['Redelijk', `Werk voor ${name} was oké, wachten duurde wat lang.`]],
+        en: [['Decent work, slow scheduling', `The technical work for ${localPhrase} was fine, though getting a confirmed time slot took longer than expected.`]],
+        fr: [['Travail correct mais délai long', `L’intervention pour ${localPhrase} a été bien faite, mais il a fallu relancer pour fixer le rendez-vous.`]],
+        nl: [['Werk in orde, planning kon vlotter', `Technisch prima uitgevoerd voor ${localPhrase}, alleen duurde het vrij lang voor de afspraak vastlag.`]],
       };
       const items = pool[language] || pool.en!;
       const [subject, body] = pick(items);
@@ -199,9 +453,9 @@ export function buildUltraShortReview(
     }
     if (stars <= 2) {
       const pool: Partial<Record<ReviewLanguage, Array<[string, string]>>> = {
-        en: [['Long wait', `Had to reschedule ${name} twice, bit frustrating.`]],
-        fr: [['Rdv décalé', `Le créneau pour ${name} a été déplacé deux fois.`]],
-        nl: [['Afspraak verzet', `Tijdslot voor ${name} werd helaas verplaatst.`]],
+        en: [['Appointment rescheduled twice', `Our slot for ${localPhrase} was pushed back twice before someone could attend, which made planning difficult.`]],
+        fr: [['Rendez-vous décalé deux fois', `Le créneau prévu pour ${localPhrase} a été reporté à deux reprises, ce qui est compliqué quand on pose congé.`]],
+        nl: [['Tijdslot twee keer verplaatst', `Onze afspraak voor ${localPhrase} werd helaas twee keer verschoven voordat er iemand kon langskomen.`]],
       };
       const items = pool[language] || pool.en!;
       const [subject, body] = pick(items);
@@ -210,17 +464,16 @@ export function buildUltraShortReview(
   } else if (stars === 5) {
     const pool: Partial<Record<ReviewLanguage, Array<[string, string]>>> = {
       en: [
-        ['Love it', `${name} works great, fast delivery.`],
-        ['Super happy', 'Exactly what I wanted, good quality'],
-        ['5/5', `Really nice ${name}, would buy again.`],
+        ['Solid quality', 'Matches the description well and arrived carefully packed on schedule.'],
+        ['Happy with this purchase', 'Build quality feels sturdy in daily use and setup was straightforward.'],
       ],
       fr: [
-        ['Top', `${name} conforme, reçu vite.`],
-        ['Très bien', 'Bonne qualité pour le prix, merci'],
+        ['Bonne qualité', 'Conforme à la fiche descriptive et reçu dans les délais annoncés.'],
+        ['Satisfait de mon achat', 'Finitions propres et utilisation simple au quotidien.'],
       ],
       nl: [
-        ['Heel blij mee', `${name} werkt prima en snel binnen.`],
-        ['Top!', 'Goede kwaliteit, precies zoals verwacht'],
+        ['Degelijke kwaliteit', 'Voldoet precies aan de beschrijving en werd netjes op tijd geleverd.'],
+        ['Blij met de aankoop', 'Voelt stevig aan in dagelijks gebruik, geen enkel minpunt tot nu toe.'],
       ],
     };
     const items = pool[language] || pool.en!;
@@ -231,119 +484,57 @@ export function buildUltraShortReview(
   return null;
 }
 
-/**
- * Diverse short human subjects to prevent repeating the same 4 titles across 50+ rows.
- */
 export const EXTRA_DIVERSE_SUBJECTS: Partial<Record<ReviewLanguage, Record<1 | 2 | 3 | 4 | 5, string[]>>> = {
   en: {
-    5: ['Great experience', 'Really glad I called', 'Super professional', 'Zero hassle', 'Fair price', 'Clean work', 'Fast turnaround', 'Spot on', 'Friendly & skilled', 'Solved quickly'],
-    4: ['Happy with the result', 'Good experience overall', 'Reliable & polite', 'Mostly great', 'Would use again', 'Fair pricing'],
-    3: ['It was alright', 'Fine once booked', 'Average wait time', 'Got the job done'],
-    2: ['Rescheduled twice', 'Wait was a bit long', 'Communication could be better'],
-    1: ['Hard to schedule', 'Slot kept moving', 'Took too long to confirm'],
+    5: ['Clear diagnosis and tidy work', 'On time and straightforward', 'Solved on the first visit', 'Honest advice, fair quote', 'Clean workmanship', 'Prompt and methodical', 'Smooth appointment from start to finish', 'Very thorough work'],
+    4: ['Good work, slight delay', 'Reliable technician overall', 'Happy with the outcome', 'Clean job once scheduled', 'Fair pricing and polite'],
+    3: ['Fine once booked', 'Work was okay, slow follow-up', 'Competent work but long wait', 'Average scheduling experience'],
+    2: ['Rescheduled twice', 'Wait time was frustrating', 'Hard to get updates before arrival'],
+    1: ['Missed the agreed window', 'Too difficult to confirm a slot'],
   },
   fr: {
-    5: ['Très bonne surprise', 'Efficace et sympa', 'Rien à redire', 'Travail soigné', 'Rapide et fiable', 'Super pro', 'Je garde le numéro', 'Propre et carré'],
-    4: ['Bon rapport qualité-prix', 'Globalement ravi', 'Équipe pro', 'Très correct', 'Bonne intervention'],
-    3: ['Correct sans plus', 'Travail ok, délai moyen', 'Ça fait le job'],
-    2: ['Délai un peu long', 'Rdv reporté', 'Attente un peu pénible'],
-    1: ['Créneau difficile à avoir', 'Horaire trop flou'],
+    5: ['Diagnostic clair et travail propre', 'Ponctuel et méthodique', 'Réglé dès le premier passage', 'Devis transparent, sans surprise', 'Intervention soignée', 'Explications claires sur place', 'Équipe sérieuse et ponctuelle', 'Travail net et précis'],
+    4: ['Bon travail malgré un léger retard', 'Intervention sérieuse dans l’ensemble', 'Satisfait du résultat final', 'Tarif correct et technicien poli'],
+    3: ['Travail correct mais attente longue', 'Résultat convenable, suivi lent', 'Prestation ok une fois planifiée'],
+    2: ['Créneau reporté deux fois', 'Délai d’attente contraignant', 'Manque de suivi sur l’horaire'],
+    1: ['Plage horaire non respectée', 'Planification trop compliquée'],
   },
   nl: {
-    5: ['Heel tevreden', 'Keurig werk', 'Vlot en correct', 'Echte aanrader', 'Snel geholpen', 'Professioneel', 'Duidelijke uitleg', 'Top vakman'],
-    4: ['Prima ervaring', 'Goed uitgevoerd', 'Betrouwbaar', 'Tevreden over het resultaat'],
-    3: ['Gewoon goed', 'Oké maar wat wachttijd', 'Degelijk werk'],
-    2: ['Planning was lastig', 'Moest even wachten'],
-    1: ['Moeilijk te plannen', 'Tijdslot schoof op'],
+    5: ['Heldere uitleg en net vakwerk', 'Stipt op de afgesproken tijd', 'Meteen verholpen bij eerste bezoek', 'Duidelijke offerte zonder verrassingen', 'Zorgvuldig en proper gewerkt', 'Vriendelijke en kundige technieker', 'Vlotte afspraak en degelijk werk', 'Keurige afwerking'],
+    4: ['Goed vakwerk, iets later dan gepland', 'Over het algemeen heel tevreden', 'Nette uitvoering en eerlijke prijs', 'Betrouwbare aanpak'],
+    3: ['Uitvoering oké, lange wachttijd', 'Degelijk werk maar trage planning', 'Redelijke ervaring zodra ingepland'],
+    2: ['Afspraak twee keer verzet', 'Communicatie over het tijdslot kon beter'],
+    1: ['Afgesproken uren niet gehaald', 'Moeilijk om een vast moment te krijgen'],
   },
 };
 
-const NATURAL_TYPOS_EN: Array<[RegExp, string]> = [
-  [/\brecommend\b/i, 'reccomend'],
-  [/\bdefinitely\b/i, 'definately'],
-  [/\breally\b/i, 'realy'],
-  [/\band\b/, '&'],
-  [/\bminutes\b/i, 'mins'],
-  [/\bhours\b/i, 'hrs'],
-  [/\bthank you\b/i, 'thx'],
-  [/\bthough\b/i, 'tho'],
-];
-
-const NATURAL_TYPOS_FR: Array<[RegExp, string]> = [
-  [/\btrès\b/i, 'tres'],
-  [/\bvraiment\b/i, 'vrmt'],
-  [/\bbeaucoup\b/i, 'bcp'],
-  [/\bà\b/, 'a'],
-  [/\bproblème\b/i, 'probleme'],
-  [/\brendez-vous\b/i, 'rdv'],
-];
-
-const NATURAL_TYPOS_NL: Array<[RegExp, string]> = [
-  [/\bgoede\b/i, 'goeie'],
-  [/\bheel\b/i, 'echt'],
-  [/\bafspraak\b/i, 'afsprak'],
-  [/\btechnieker\b/i, 'monteur'],
-];
-
 /**
- * Applies subtle, authentic human typing imperfections to ~28% of reviews
- * (casual lowercase start, missing trailing period, natural phone typo/abbreviation)
- * so the dataset doesn't look sterile or AI-polished.
+ * Clean natural formatting polisher — NEVER introduces artificial spelling mistakes or chat slang!
+ * Fixes accidental double spaces, mid-sentence capital splices, and missing terminal punctuation.
  */
 export function applyHumanImperfections(
   subject: string,
   body: string,
-  language: ReviewLanguage
+  _language: ReviewLanguage
 ): { subject: string; body: string } {
-  let nextSubject = subject;
-  let nextBody = body;
+  const cleanSubject = subject
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.;!?])/g, '$1')
+    .replace(/\.+$/, '')
+    .trim();
 
-  // 1. ~22% chance: subtle casual typo or phone shorthand (max 1 replacement per review)
-  if (Math.random() < 0.22) {
-    const table =
-      language === 'fr'
-        ? NATURAL_TYPOS_FR
-        : language === 'nl'
-        ? NATURAL_TYPOS_NL
-        : language === 'en'
-        ? NATURAL_TYPOS_EN
-        : [];
-    if (table.length > 0) {
-      const shuffled = [...table].sort(() => Math.random() - 0.5);
-      for (const [rx, rep] of shuffled) {
-        if (rx.test(nextBody)) {
-          nextBody = nextBody.replace(rx, rep);
-          break;
-        }
-      }
-    }
+  let cleanBody = body
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.;!?])/g, '$1')
+    .replace(/([.!?])\s*\./g, '$1')
+    .replace(/([a-zà-ÿ])\s+\.\s+/gi, '$1. ')
+    .trim();
+
+  if (cleanBody.length > 0 && !/[.!?؟。]$/.test(cleanBody)) {
+    cleanBody += '.';
   }
 
-  // 2. ~18% chance: drop trailing period on body (very common on mobile)
-  if (language !== 'ar' && language !== 'he' && Math.random() < 0.18 && nextBody.endsWith('.')) {
-    nextBody = nextBody.slice(0, -1);
-  }
-
-  // 3. ~12% chance: casual lowercase subject or body opening (real phone typing)
-  if (language !== 'de' && language !== 'ar' && language !== 'he') {
-    if (Math.random() < 0.12 && nextSubject.length > 0) {
-      nextSubject = nextSubject[0].toLowerCase() + nextSubject.slice(1);
-    }
-    if (Math.random() < 0.09 && nextBody.length > 0 && !/^[A-Z]{2,}/.test(nextBody)) {
-      nextBody = nextBody[0].toLowerCase() + nextBody.slice(1);
-    }
-  }
-
-  return { subject: nextSubject, body: nextBody };
-}
-
-interface ServiceStoryParts {
-  problem: string[];
-  action: string[];
-  appointment: string[];
-  resolution: string[];
-  observation: string[];
-  companyMentions: string[];
+  return { subject: cleanSubject, body: cleanBody };
 }
 
 function cleanCompanyName(raw?: string): string {
@@ -352,352 +543,397 @@ function cleanCompanyName(raw?: string): string {
     .replace(/\(built-in\)/gi, '')
     .replace(/custom business catalog/gi, '')
     .replace(/^www\./i, '')
-    .replace(/\.(com|be|nl|fr|org|net|io)$/i, '')
+    .replace(/\.(com|be|nl|fr|org|net|io|co\.uk|de|ch|ma)$/i, '')
     .replace(/[-_]+/g, ' ')
     .trim();
   if (cleaned.length < 2 || cleaned.length > 48) return '';
-  return cleaned.replace(/\b\w/g, (c) => c.toUpperCase());
+  return cleaned;
 }
 
-function getServiceStoryBank(
-  product: CatalogProduct,
-  language: ReviewLanguage
-): ServiceStoryParts {
-  const haystack = `${product.item_name} ${product.item_slug} ${product.category}`.toLowerCase();
-  const isBoiler = /boiler|heat|chauffage|verwarming|ketel|warm|hot water|bulex|vaillant|radiator|thermostat|hvac/i.test(haystack);
-  const isLeak = /leak|lek|fuite|plumb|plombier|loodgieter|pipe|drain|sink|toilet|tap|faucet|water/i.test(haystack);
-  const isElectric = /electr|wiring|panel|breaker|outlet|lighting|stroom/i.test(haystack);
-  const isCleaning = /clean|nettoyage|schoonmaak|maid|housekeep|carpet|window/i.test(haystack);
-  const isClinic = /dental|dentist|clinic|doctor|medical|physio|therapy|osteopath|skin|derma/i.test(haystack);
-  const isAgency = /web|seo|design|marketing|agency|audit|consult|dev|software|brand|ads|social/i.test(haystack);
-  const name = product.item_name;
-
-  if (language === 'fr') {
-    return {
-      problem: isBoiler
-        ? [
-            'Notre chaudière perdait de la pression chaque nuit et on n’avait plus d’eau chaude le matin.',
-            'Le chauffage s’est coupé d’un coup avec un code d’erreur en plein week-end.',
-            'Les radiateurs restaient tièdes malgré le thermostat à fond.',
-          ]
-        : isLeak
-        ? [
-            'Une fuite sous l’évier de la cuisine commençait à gonfler le meuble.',
-            'Un tuyau derrière les toilettes gouttait sans arrêt depuis deux jours.',
-            'La pression d’eau avait chuté brusquement dans toute la salle de bain.',
-          ]
-        : isAgency
-        ? [
-            `On cherchait un vrai partenaire pour nous aider sur ${name} après plusieurs essais peu concluants.`,
-            `Notre besoin sur ${name} traînait depuis des mois faute de méthode claire.`,
-          ]
-        : isClinic
-        ? [
-            `J’appréhendais un peu mon rendez-vous pour ${name} après une mauvaise expérience ailleurs.`,
-            `J’avais besoin d’un suivi sérieux pour ${name} sans attendre des semaines.`,
-          ]
-        : [
-            `On avait besoin d’une vraie solution pour ${name} et on ne savait pas par où commencer.`,
-            `Le souci lié à ${name} durait depuis plusieurs jours avant qu’on les contacte.`,
-          ],
-      action: isBoiler
-        ? [
-            'Le technicien a contrôlé le vase d’expansion, nettoyé le brûleur et changé la vanne usée en moins d’une heure.',
-            'Il a purgé le circuit, remplacé le capteur défectueux et testé l’eau chaude sur chaque robinet.',
-          ]
-        : isLeak
-        ? [
-            'Le plombier a trouvé le joint fissuré sans casser le coffrage et a refait le raccord proprement.',
-            'Il a remplacé la pièce défectueuse et vérifié l’étanchéité sous pression pendant dix minutes.',
-          ]
-        : isElectric
-        ? [
-            'L’électricien a identifié le circuit en défaut au tableau, remplacé le disjoncteur et tout testé en sécurité.',
-          ]
-        : isCleaning
-        ? [
-            'L’équipe a pris le temps de traiter chaque recoin demandé, sans rien bâcler.',
-          ]
-        : isClinic
-        ? [
-            `Le praticien a pris le temps d’expliquer chaque étape de ${name} avec beaucoup de douceur.`,
-          ]
-        : isAgency
-        ? [
-            `Ils ont d’abord analysé notre situation sur ${name}, proposé un plan concret et livré exactement ce qui était prévu.`,
-          ]
-        : [
-            `Ils ont bien évalué notre besoin pour ${name}, expliqué les étapes clairement et réalisé le travail avec soin.`,
-            `L’intervention sur ${name} a été menée de manière précise, sans rien laisser au hasard.`,
-          ],
-      appointment: [
-        'Ils ont prévenu avant le rendez-vous et confirmé le tarif clairement avant de démarrer.',
-        'Rendez-vous pris facilement et horaire respecté à la minute près.',
-        'Prise de contact simple et créneau obtenu rapidement comme promis.',
-      ],
-      resolution: isBoiler || isLeak
-        ? [
-            'Depuis son passage, tout fonctionne sans le moindre souci.',
-            'Problème réglé dès la première visite, plus aucune panne depuis trois semaines.',
-          ]
-        : [
-            `Le résultat sur ${name} correspond exactement à ce qu’on attendait.`,
-            `Tout a été réglé proprement dès la première fois, vrai soulagement.`,
-          ],
-      observation: isBoiler || isLeak
-        ? [
-            'J’ai vraiment apprécié qu’il protège le sol et prenne 5 minutes pour expliquer comment tout surveiller.',
-            'Pas de vente forcée, juste des conseils honnêtes et un travail laissé nickel.',
-          ]
-        : [
-            'Aucune pression commerciale, juste des conseils honnêtes et un vrai sens du détail.',
-            'Rare de tomber sur une équipe aussi à l’écoute et transparente.',
-          ],
-      companyMentions: [
-        'C’était notre première fois avec {company} et on garde clairement leur contact.',
-        'Je comprends pourquoi on nous a recommandé {company}.',
-        'Franchement, l’équipe de {company} fait la différence par son sérieux.',
-      ],
-    };
-  }
-
-  if (language === 'nl') {
-    return {
-      problem: isBoiler
-        ? [
-            'Onze ketel verloor elke nacht druk en ’s ochtends hadden we geen warm water meer.',
-            'De verwarming viel plots uit met een foutcode net toen het koud werd.',
-            'De radiatoren bleven lauw terwijl de ketel vreemde geluiden maakte.',
-          ]
-        : isLeak
-        ? [
-            'Een klein lek onder de keukenkraan maakte het hele kastje nat.',
-            'De leiding achter het toilet bleef druppelen en we kregen het zelf niet dicht.',
-            'De waterdruk viel ineens weg in de badkamer.',
-          ]
-        : [
-            `We hadden een concrete oplossing nodig voor ${name} en wilden iemand die het meteen goed aanpakt.`,
-            `Na lang uitstellen toch contact opgenomen voor ${name}.`,
-          ],
-      action: isBoiler
-        ? [
-            'De technieker heeft het expansievat nagekeken, een versleten klep vervangen en alles netjes ontlucht.',
-            'Hij heeft de ketel opengemaakt, de sensor vervangen en zowel warm water als verwarming dubbel getest.',
-          ]
-        : isLeak
-        ? [
-            'De loodgieter vond de lekkende koppeling zonder breekwerk en plaatste meteen een nieuwe dichting.',
-            'Hij verving het stuk leiding en testte alle kranen op volle druk voor hij vertrok.',
-          ]
-        : isCleaning
-        ? [
-            `Het team werkte ${name} grondig en netjes af tot in de kleinste details.`,
-          ]
-        : [
-            `Ze bekeken onze situatie voor ${name} heel zorgvuldig, legden alles duidelijk uit en voerden het werk vakkundig uit.`,
-            `Stap voor stap aangepakt voor ${name} zonder onnodige omwegen.`,
-          ],
-      appointment: [
-        'Netjes vooraf laten weten hoe laat ze kwamen en eerst een heldere prijsafspraak gemaakt.',
-        'De afspraak lag snel vast en ze waren stipt binnen het afgesproken tijdslot.',
-        'Vlot contact en snel geholpen zoals beloofd.',
-      ],
-      resolution: isBoiler || isLeak
-        ? [
-            'Sinds het bezoek werkt alles weer foutloos zonder één storing.',
-            'Direct opgelost bij de eerste interventie, nu al drie weken geen probleem meer.',
-          ]
-        : [
-            `Het resultaat voor ${name} is precies zoals we hoopten.`,
-            'Meteen goed opgelost bij de eerste keer, echt een opluchting.',
-          ],
-      observation: isBoiler || isLeak
-        ? [
-            'Heel fijn dat alles netjes werd opgeruimd en ik duidelijke uitleg kreeg voor later.',
-            'Geen opdringerige extra kosten, gewoon eerlijk vakwerk.',
-          ]
-        : [
-            'Geen opdringerige verkoop, gewoon eerlijk advies en verzorgd werk.',
-            'Vriendelijke aanpak en je merkt meteen dat ze hun vak kennen.',
-          ],
-      companyMentions: [
-        'Eerste keer dat we {company} inschakelden en hun nummer staat nu vast in mijn telefoon.',
-        'Blij dat we op aanraden van kennissen voor {company} hebben gekozen.',
-        'De service van {company} stak er echt bovenuit vergeleken met eerdere ervaringen.',
-      ],
-    };
-  }
-
-  // English (default)
-  return {
-    problem: isBoiler
-      ? [
-          'Our boiler kept losing pressure overnight and we woke up to cold showers twice in a row.',
-          'The heating suddenly cut out with a blinking error code right as the weather turned cold.',
-          'Hot water was going lukewarm after two minutes and the boiler was making a clicking noise.',
-        ]
-      : isLeak
-      ? [
-          'A slow leak under the kitchen sink started soaking the cabinet before we noticed it.',
-          'The pipe behind our upstairs toilet was dripping nonstop and we could not tighten it ourselves.',
-          'Water pressure dropped across the house and we spotted dampness near the main shutoff.',
-        ]
-      : isElectric
-      ? [
-          'One of our main circuits kept tripping every evening whenever two appliances ran together.',
-        ]
-      : isCleaning
-      ? [
-          `We needed a thorough ${name} before moving in and didn’t have the time to tackle it ourselves.`,
-        ]
-      : isClinic
-      ? [
-          `I had been putting off booking ${name} because I’m usually nervous about appointments.`,
-        ]
-      : isAgency
-      ? [
-          `We had been struggling with ${name} for months and needed a team that actually delivered results.`,
-        ]
-      : [
-          `We needed reliable help with ${name} and wanted it handled properly the first time.`,
-          `Had been putting off ${name} for weeks until we finally decided to get it sorted.`,
-        ],
-    action: isBoiler
-      ? [
-          'The technician checked the expansion vessel, swapped out a worn valve, and bled the radiators in under an hour.',
-          'He diagnosed a faulty pressure sensor right away, replaced it on the spot, and tested both heating and hot water.',
-        ]
-      : isLeak
-      ? [
-          'The plumber traced the cracked fitting without cutting into the cabinetry and replaced the joint cleanly.',
-          'He swapped the worn seal, tightened the supply line, and ran every tap to verify zero drips.',
-        ]
-      : isElectric
-      ? [
-          'The electrician tested the breaker panel, replaced the faulty circuit, and labeled everything clearly.',
-        ]
-      : isCleaning
-      ? [
-          'They worked through every room methodically and paid extra attention to the kitchen and bathroom details.',
-        ]
-      : isClinic
-      ? [
-          `The specialist explained every step of ${name} calmly beforehand and checked in throughout the visit.`,
-        ]
-      : isAgency
-      ? [
-          `They audited our setup for ${name}, laid out clear priorities, and shipped the improvements right on schedule.`,
-        ]
-      : [
-          `They assessed what we needed for ${name}, walked us through the plan clearly, and completed the work carefully.`,
-          `Handled ${name} step by step with real attention to detail and double-checked everything at the end.`,
-        ],
-    appointment: [
-      'They messaged ahead of the appointment and walked me through the exact quote before starting.',
-      'Booking was straightforward and they were right on time inside the promised window.',
-      'Got a convenient slot quickly and communication stayed clear from start to finish.',
-    ],
-    resolution: isBoiler || isLeak
-      ? [
-          'Everything has been running smoothly for three weeks now with zero issues.',
-          'Problem completely solved on the first visit — huge relief.',
-        ]
-      : [
-          `The outcome for ${name} is exactly what we needed.`,
-          'Everything was sorted out cleanly on the first go — huge relief.',
-        ],
-    observation: isBoiler || isLeak
-      ? [
-          'Really appreciated that he left the area spotless and showed me what to keep an eye on.',
-          'No pushy upselling at all, just honest advice and tidy workmanship.',
-        ]
-      : [
-          'No pushy upselling at all, just honest advice and genuinely thoughtful service.',
-          'You rarely meet a team this patient when answering questions.',
-        ],
-    companyMentions: [
-      'First time using {company} and I already saved their details for next time.',
-      'Now I see why people around here keep recommending {company}.',
-      'Honestly, {company} handled this way better than the last place we tried.',
-    ],
-  };
-}
-
-function pickUniqueSentence(arr: string[], usedSentences?: Set<string>): string {
-  if (!usedSentences || arr.length <= 1) return pick(arr);
+function pickUniqueSentence(arr: string[], usedSentences?: Set<string>): string | null {
+  if (arr.length === 0) return null;
+  if (!usedSentences) return pick(arr);
   const unused = arr.filter((s) => !usedSentences.has(s.toLowerCase()));
-  const chosen = unused.length > 0 ? pick(unused) : pick(arr);
+  if (unused.length === 0) return null;
+  const chosen = pick(unused);
   usedSentences.add(chosen.toLowerCase());
   return chosen;
 }
 
 /**
- * Builds a grounded, non-generic, multi-element service review story covering:
- * problem -> technician action -> appointment -> resolution -> personal observation / company mention.
- * Uses globalUsedSentences to prevent repeating the same story sentences across rows.
+ * Builds a grounded, non-repetitive, offering-accurate multi-sentence customer review:
+ * 1) Prefers AI-scanned `offeringContext` (works dynamically for ANY business/URL!).
+ * 2) Falls back to strictly separated sub-archetypes in keyless mode.
+ * 3) Enforces star-to-sentiment honesty and caps company-name mentions to <= 12%.
  */
 export function buildDetailedServiceStory(
   product: CatalogProduct,
   language: ReviewLanguage,
   stars: 1 | 2 | 3 | 4 | 5,
   companyName?: string,
-  usedSentences?: Set<string>
+  usedSentences?: Set<string>,
+  offeringCtx?: OfferingVoiceContext | null
 ): { subject: string; body: string } | null {
-  if (stars <= 2) return null; // Negative reviews stay realistic scheduling/expectation stories
-  if (!['en', 'fr', 'nl'].includes(language)) return null;
+  if (stars <= 3) return null; // Keep 1-3★ on dedicated neutral/critical paths so 3★ never gets 5★ praise!
 
-  const bank = getServiceStoryBank(product, language);
   const company = cleanCompanyName(companyName);
 
-  // If all problem sentences for this subtype were already used, let caller fall back to varied composer
-  if (usedSentences && bank.problem.every((p) => usedSentences.has(p.toLowerCase()))) {
-    return null;
+  // Path A: AI-scanned per-offering context (100% tailored to ANY scanned URL & offering!)
+  if (
+    offeringCtx &&
+    offeringCtx.scenarios?.length > 0 &&
+    offeringCtx.actions?.length > 0 &&
+    offeringCtx.outcomes?.length > 0
+  ) {
+    const s1 = pickUniqueSentence(offeringCtx.scenarios, usedSentences);
+    const s2 = pickUniqueSentence(offeringCtx.actions, usedSentences);
+    const s3 = pickUniqueSentence(offeringCtx.outcomes, usedSentences);
+    if (s1 && s2) {
+      const parts = [s1, s2];
+      if (s3 && Math.random() < 0.7) parts.push(s3);
+      if (stars === 4) {
+        const nuance =
+          language === 'fr'
+            ? 'Il a fallu patienter quelques jours pour avoir un créneau, mais le résultat vaut l’attente.'
+            : language === 'nl'
+            ? 'Het duurde een paar dagen voor er plek was in de agenda, maar het werk zelf is keurig uitgevoerd.'
+            : 'Getting a slot took a couple of days, though the work itself was handled very cleanly.';
+        parts.push(nuance);
+      } else if (company && Math.random() < 0.12) {
+        const mention =
+          language === 'fr'
+            ? `Bon premier contact avec ${company}, nous gardons leurs coordonnées.`
+            : language === 'nl'
+            ? `Fijne eerste ervaring met ${company}.`
+            : `Good first experience with ${company}.`;
+        parts.push(mention);
+      }
+      const subjPool = EXTRA_DIVERSE_SUBJECTS[language]?.[stars] || EXTRA_DIVERSE_SUBJECTS.en![stars];
+      return applyHumanImperfections(pick(subjPool), parts.join(' '), language);
+    }
   }
 
-  const parts: string[] = [];
-  parts.push(pickUniqueSentence(bank.problem, usedSentences));
-  parts.push(pickUniqueSentence(bank.action, usedSentences));
+  if (!['en', 'fr', 'nl'].includes(language)) return null;
 
-  const roll = Math.random();
-  if (roll < 0.45) {
-    parts.push(pickUniqueSentence(bank.appointment, usedSentences));
-    parts.push(pickUniqueSentence(bank.resolution, usedSentences));
-  } else if (roll < 0.75) {
-    parts.push(pickUniqueSentence(bank.resolution, usedSentences));
-  } else {
-    parts.push(pickUniqueSentence(bank.appointment, usedSentences));
-  }
+  const arch = classifyServiceArchetype(product);
+  const localPhrase = getLocalizedOfferingPhrase(product, language, offeringCtx);
 
-  if (company && Math.random() < 0.48) {
-    parts.push(pickUniqueSentence(bank.companyMentions, usedSentences).replace(/\{company\}/g, company));
-  } else if (Math.random() < 0.65) {
-    parts.push(pickUniqueSentence(bank.observation, usedSentences));
-  }
-
-  const subjectsByLang: Record<string, string[]> = {
-    en: [
-      `Fixed our ${product.item_name.toLowerCase()} fast`,
-      company ? `Great experience with ${company}` : 'Solved on the first visit',
-      'Honest technician, clean work',
-      'Back to normal same day',
-      'No surprises on the quote',
-    ],
-    fr: [
-      `${product.item_name} réglé rapidement`,
-      company ? `Très content de ${company}` : 'Problème réglé dès la première visite',
-      'Technicien honnête et propre',
-      'Intervention claire et efficace',
-    ],
-    nl: [
-      `${product.item_name} snel opgelost`,
-      company ? `Heel tevreden van ${company}` : 'Meteen opgelost bij eerste bezoek',
-      'Eerlijke vakman en net werk',
-      'Duidelijke uitleg en vlot geregeld',
-    ],
+  type ArchetypeStory = { scenarios: string[]; actions: string[]; outcomes: string[] };
+  const storyMap: Partial<Record<ServiceSubArchetype, Record<'en' | 'fr' | 'nl', ArchetypeStory>>> = {
+    boiler_repair: {
+      en: {
+        scenarios: [
+          'Our boiler dropped to zero bar overnight and locked out with an error code before breakfast.',
+          'Hot water kept cutting out mid-shower while the boiler made a metallic rattling sound.',
+          'The central heating stopped firing right as temperatures dipped over the weekend.',
+        ],
+        actions: [
+          'The technician tested the expansion vessel, replaced the worn pressure sensor, and bled the circuit.',
+          'He traced the fault to a sticking diverter valve, fitted the replacement part from his van, and checked flue safety.',
+          'After checking the ignition electrode and cleaning the condensate trap, he ran two full heating cycles.',
+        ],
+        outcomes: [
+          'Pressure has stayed rock steady for weeks now and he explained clearly what caused the fault.',
+          'Quote was confirmed before starting and the utility area was left completely tidy.',
+        ],
+      },
+      fr: {
+        scenarios: [
+          'Notre chaudière affichait un code d’erreur au réveil avec une pression retombée sous 0,5 bar.',
+          'Plus d’eau chaude sous la douche depuis la veille et le brûleur refusait de se relancer.',
+          'La chaudière se mettait en sécurité toutes les deux heures dès que le chauffage démarrait.',
+        ],
+        actions: [
+          'Le chauffagiste a contrôlé le vase d’expansion, remplacé la vanne trois voies défectueuse et purgé le réseau.',
+          'Il a testé la sonde de pression, changé l’électrode d’allumage usée et vérifié la stabilité de l’eau chaude.',
+          'Après nettoyage du siphon des condensats et réglage de la pression, il a testé l’installation pendant vingt minutes.',
+        ],
+        outcomes: [
+          'Le tarif a été annoncé avant réparation et nous n’avons plus eu la moindre coupure depuis.',
+          'Explications claires sans pousser au remplacement de l’appareil.',
+        ],
+      },
+      nl: {
+        scenarios: [
+          'Onze ketel sprong s ochtends telkens in veiligheid met een knipperende foutcode en koude kranen.',
+          'De waterdruk op het display zakte elke dag weg waardoor de verwarming niet meer aansloeg.',
+          'Tijdens het douchen viel het warme water telkens na twee minuten weg.',
+        ],
+        actions: [
+          'De technieker meette het expansievat na, verving de defecte druksensor en ontluchtte het circuit.',
+          'Hij verving de versleten driewegklep met een wisselstuk uit de wagen en controleerde alle aansluitingen.',
+          'Na het reinigen van de sifon en het afstellen van de ontsteking draaide het toestel meteen weer stil.',
+        ],
+        outcomes: [
+          'Vooraf een duidelijke prijsafspraak gekregen en intussen draait alles al weken stabiel.',
+          'Fijn dat hij rustig uitlegde waar de storing vandaan kwam zonder iets op te dringen.',
+        ],
+      },
+    },
+    boiler_maintenance: {
+      en: {
+        scenarios: [
+          'Booked our biennial statutory boiler inspection ahead of the autumn heating season.',
+          'Scheduled a routine preventive boiler checkup required for our home insurance and rental lease.',
+        ],
+        actions: [
+          'The technician brushed down the burner, cleaned the heat exchanger, and ran a full flue-gas analyzer check.',
+          'He inspected all seals, topped up system pressure, and emailed the official inspection certificate on the spot.',
+        ],
+        outcomes: [
+          'Whole visit took about an hour, price matched the fixed maintenance tariff, and everything was left clean.',
+          'Good to have the compliance paperwork sorted with clear advice for next winter.',
+        ],
+      },
+      fr: {
+        scenarios: [
+          'Rendez-vous pris avant l’automne pour l’entretien légal de notre chaudière gaz.',
+          'Nous devions faire réaliser le contrôle périodique obligatoire avec remise d’attestation.',
+        ],
+        actions: [
+          'Le technicien a démonté et nettoyé le brûleur, vérifié les gaz de combustion et contrôlé chaque joint.',
+          'Nettoyage complet du corps de chauffe, appoint de pression et envoi immédiat du certificat officiel.',
+        ],
+        outcomes: [
+          'Intervention ponctuelle au forfait convenu et chaufferie laissée impeccable.',
+          'Pratique d’avoir reçu l’attestation officielle directement en fin de visite.',
+        ],
+      },
+      nl: {
+        scenarios: [
+          'Afspraak ingepland voor het verplichte tweejaarlijkse onderhoud van onze gasketel voor de winter.',
+          'Voor onze brandverzekering en verhuur hadden we een officieel reinigings- en verbrandingsattest nodig.',
+        ],
+        actions: [
+          'De technieker reinigde de brander en warmtewisselaar grondig en voerde een rookgasmeting uit.',
+          'Alle dichtingen en beveiligingen werden nagekeken en ik ontving meteen het wettelijke keuringsattest.',
+        ],
+        outcomes: [
+          'Stipt op tijd en exact volgens het afgesproken onderhoudstarief afgerekend.',
+          'De ketel draait merkbaar stiller na het onderhoud en alle documenten zijn netjes in orde.',
+        ],
+      },
+    },
+    boiler_install: {
+      en: {
+        scenarios: [
+          'After fifteen years with an inefficient non-condensing unit, we decided to upgrade to a modern gas condensing boiler.',
+          'During our utility room renovation we wanted our aging boiler replaced with a compact wall-hung condensing model.',
+        ],
+        actions: [
+          'They sent an itemized quote first, removed the old unit, adapted the flue pipework, and commissioned the new boiler in one day.',
+          'Pipe routing was finished neatly in copper, magnetic filter installed, and they set up the modulating room thermostat with us.',
+        ],
+        outcomes: [
+          'Hot water heats up much faster now and gas consumption has already dropped noticeably.',
+          'Clean installation from quote to handover with zero surprise extras on the invoice.',
+        ],
+      },
+      fr: {
+        scenarios: [
+          'Nous souhaitions remplacer notre vieille chaudière de quinze ans par un modèle gaz à condensation plus sobre.',
+          'Dans le cadre de nos travaux, nous cherchions un chauffagiste sérieux pour poser une nouvelle chaudière murale.',
+        ],
+        actions: [
+          'Après un devis détaillé, l’équipe a déposé l’ancien appareil, adapté le tubage et mis en service la nouvelle chaudière sur la journée.',
+          'Pose très propre avec filtre magnétique, raccords soignés et explications complètes sur le thermostat modulant.',
+        ],
+        outcomes: [
+          'La maison chauffe plus vite en consommant nettement moins et l’ancien matériel a été repris.',
+          'Facture identique au devis signé et chantier laissé nickel.',
+        ],
+      },
+      nl: {
+        scenarios: [
+          'Onze oude verwarmingsketel van zestien jaar was aan vervanging toe en we wilden overschakelen op een zuinige condensatieketel.',
+          'Bij de vernieuwing van onze technische ruimte zochten we een vakman voor de plaatsing van een nieuwe wandketel.',
+        ],
+        actions: [
+          'Eerst kwamen ze langs voor een heldere offerte op maat, waarna de oude ketel en rookgasafvoer op één dag netjes werden vervangen.',
+          'De leidingen en vuilafscheider zijn strak gemonteerd en de modulerende thermostaat werd samen met ons ingesteld.',
+        ],
+        outcomes: [
+          'Het toestel is fluisterstil en ons gasverbruik ligt nu al merkbaar lager.',
+          'Alles volgens offerte afgewerkt en het oude toestel meteen meegenomen.',
+        ],
+      },
+    },
+    heat_pump: {
+      en: {
+        scenarios: [
+          'While renovating our house with underfloor heating, we wanted an air-to-water heat pump sized properly for Belgian winters.',
+          'We asked for technical advice on switching from gas to a hybrid heat pump setup.',
+        ],
+        actions: [
+          'They completed a room-by-room heat-loss study, mounted the outdoor unit on anti-vibration feet, and configured the weather-compensated curve.',
+          'Both indoor hydrobox and outdoor unit were installed neatly over two days with clear explanations of the app controls.',
+        ],
+        outcomes: [
+          'Indoor temperature stays comfortable day and night and you barely hear the outdoor fan.',
+          'Appreciated the realistic efficiency projections before we committed.',
+        ],
+      },
+      fr: {
+        scenarios: [
+          'Pour notre rénovation avec chauffage sol, nous voulions installer une pompe à chaleur air-eau bien dimensionnée.',
+          'Nous cherchions un avis technique honnête pour passer sur une pompe à chaleur hybride.',
+        ],
+        actions: [
+          'Étude de déperdition précise avant devis, pose de l’unité extérieure sur plots anti-vibrations et réglage fin de la loi d’eau.',
+          'Installation complète du module hydraulique et de l’unité extérieure en deux jours avec prise en main de la régulation.',
+        ],
+        outcomes: [
+          'Confort thermique très stable dans toute la maison et niveau sonore extérieur bluffant de discrétion.',
+          'Conseils honnêtes sur le dimensionnement sans promesses exagérées.',
+        ],
+      },
+      nl: {
+        scenarios: [
+          'Bij onze verbouwing met vloerverwarming wilden we overstappen op een lucht-waterwarmtepomp.',
+          'We zochten eerlijk technisch advies over het combineren van onze isolatie met een hybride warmtepomp.',
+        ],
+        actions: [
+          'Na een grondige warmteverliesberekening plaatsten ze de buitenunit op trillingsdempers en stelden ze de stooklijn nauwkeurig in.',
+          'Zowel de binnenmodule als de buitenunit werden in twee dagen strak geïnstalleerd met duidelijke uitleg over de regeling.',
+        ],
+        outcomes: [
+          'Constante aangename warmte in huis en de buitenunit hoor je in de tuin nauwelijks draaien.',
+          'Fijn dat ze realistisch rekenden in plaats van een te zwaar systeem te verkopen.',
+        ],
+      },
+    },
+    leak_repair: {
+      en: {
+        scenarios: [
+          'We noticed a damp patch spreading along the hallway wall near the downstairs bathroom.',
+          'Water started pooling inside the kitchen sink cabinet every time the dishwasher drained.',
+        ],
+        actions: [
+          'The plumber pinpointed the weeping copper elbow with acoustic detection, replaced the fitting cleanly, and pressure-tested the pipe.',
+          'He swapped the split drain manifold and perished washer in forty minutes without damaging the cabinetry.',
+        ],
+        outcomes: [
+          'Completely dry ever since and he left a clear report we could forward to our insurer.',
+        ],
+      },
+      fr: {
+        scenarios: [
+          'Une auréole d’humidité apparaissait sur la cloison mitoyenne de la salle de douche.',
+          'De l’eau s’accumulait sous le meuble d’évier à chaque ouverture du robinet.',
+        ],
+        actions: [
+          'Le plombier a détecté le raccord fuyard sans démolir le carrelage, refait la soudure et testé la conduite sous pression.',
+          'Remplacement rapide du joint fibre et du flexible abîmé avec vérification complète des évacuations.',
+        ],
+        outcomes: [
+          'Plus une goutte depuis son passage et rapport d’intervention clair pour notre assurance.',
+        ],
+      },
+      nl: {
+        scenarios: [
+          'Er verscheen plots een vochtplek onderaan de muur naast onze badkamer.',
+          'Onder het aanrecht stond telkens een plasje water zodra we de kraan of vaatwasser gebruikten.',
+        ],
+        actions: [
+          'Met lekdetectie vond de loodgieter snel de lekkende koppeling zonder tegels uit te breken en herstelde de leiding netjes.',
+          'Hij verving de gescheurde afvoerdichting en versleten flexibele slang en controleerde daarna alle aansluitingen op druk.',
+        ],
+        outcomes: [
+          'Sindsdien kurkdroog gebleven en een duidelijk verslag gekregen voor de verzekering.',
+        ],
+      },
+    },
+    plumbing_install: {
+      en: {
+        scenarios: [
+          'Needed new water supply lines, shutoff valves, and sanitary hookups installed for our utility room.',
+          'Booked a plumber to fit a new thermostatic shower mixer, basin tap, and wall-hung toilet frame.',
+        ],
+        actions: [
+          'All pipework was clipped squarely, shutoff valves labeled, and every joint tested before closing the panel.',
+          'Mounted the fixtures cleanly, sealed the edges neatly, and checked flow and drainage across the bathroom.',
+        ],
+        outcomes: [
+          'Tidy finish and straightforward invoicing matching the written estimate.',
+        ],
+      },
+      fr: {
+        scenarios: [
+          'Nous avions besoin de faire poser de nouvelles arrivées d’eau, vannes d’arrêt et raccords pour notre buanderie.',
+          'Intervention demandée pour installer un mitigeur thermostatique, un lavabo et un bâti-support WC.',
+        ],
+        actions: [
+          'Tuyauterie fixée proprement, vannes repérées et test d’étanchéité complet avant fermeture du coffrage.',
+          'Pose soignée des équipements sanitaires avec joints propres et contrôle du débit.',
+        ],
+        outcomes: [
+          'Finitions nettes et facture conforme au devis initial.',
+        ],
+      },
+      nl: {
+        scenarios: [
+          'Voor onze vernieuwde wasplaats moesten nieuwe waterleidingen, dubbeldienstkranen en een afvoer worden aangelegd.',
+          'We schakelden hen in voor het plaatsen van een nieuw inbouwtoilet, wastafelkraan en thermostatische douchekraan.',
+        ],
+        actions: [
+          'Alle leidingen zijn recht en overzichtelijk gemonteerd en voor het dichtmaken grondig op druk getest.',
+          'Het sanitair werd waterpas geplaatst, netjes afgekit en meteen getest op vlotte afvoer.',
+        ],
+        outcomes: [
+          'Verzorgd resultaat en exact afgerekend zoals op de offerte stond.',
+        ],
+      },
+    },
   };
 
-  const subject = pick(subjectsByLang[language] || subjectsByLang.en);
-  const body = parts.join(' ');
-  return applyHumanImperfections(subject, body, language);
-}
+  const langKey = language as 'en' | 'fr' | 'nl';
+  const entry = storyMap[arch]?.[langKey];
+  if (!entry) {
+    // Clean general fallback without foreign-label insertion
+    const genScenarios =
+      langKey === 'fr'
+        ? [`Nous avons pris rendez-vous pour ${localPhrase} et l’organisation a été simple dès le premier appel.`]
+        : langKey === 'nl'
+        ? [`We maakten een afspraak voor ${localPhrase} en kregen vooraf meteen een duidelijk tijdslot door.`]
+        : [`We scheduled an appointment for ${localPhrase} and got a clear confirmation window right away.`];
+    const genActions =
+      langKey === 'fr'
+        ? ['Le spécialiste a pris le temps d’expliquer les étapes sur place et a travaillé avec soin.']
+        : langKey === 'nl'
+        ? ['De vakman legde ter plaatse rustig uit wat hij ging doen en werkte alles netjes af.']
+        : ['The specialist walked us through the work beforehand and completed everything methodically.'];
+    const s1 = pickUniqueSentence(genScenarios, usedSentences);
+    const s2 = pickUniqueSentence(genActions, usedSentences);
+    if (!s1 || !s2) return null;
+    const subjPool = EXTRA_DIVERSE_SUBJECTS[language]?.[stars] || EXTRA_DIVERSE_SUBJECTS.en![stars];
+    return applyHumanImperfections(pick(subjPool), `${s1} ${s2}`, language);
+  }
 
+  const s1 = pickUniqueSentence(entry.scenarios, usedSentences);
+  const s2 = pickUniqueSentence(entry.actions, usedSentences);
+  const s3 = pickUniqueSentence(entry.outcomes, usedSentences);
+  if (!s1 || !s2) return null;
+
+  const parts = [s1, s2];
+  if (s3) parts.push(s3);
+  if (stars === 4) {
+    parts.push(
+      langKey === 'fr'
+        ? 'Seul petit bémol : un léger décalage d’horaire le matin, mais annoncé par téléphone.'
+        : langKey === 'nl'
+        ? 'Enige kleine minpuntje was dat het tijdslot iets uitliep, al belden ze netjes vooraf.'
+        : 'Only minor note was a short delay on arrival, though they called ahead to let us know.'
+    );
+  } else if (company && Math.random() < 0.12) {
+    parts.push(
+      langKey === 'fr'
+        ? `Bon suivi de la part de ${company}.`
+        : langKey === 'nl'
+        ? `Correcte opvolging door ${company}.`
+        : `Straightforward experience with ${company}.`
+    );
+  }
+
+  const subjPool = EXTRA_DIVERSE_SUBJECTS[language]?.[stars] || EXTRA_DIVERSE_SUBJECTS.en![stars];
+  return applyHumanImperfections(pick(subjPool), parts.join(' '), language);
+}

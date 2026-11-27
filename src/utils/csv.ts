@@ -3,7 +3,13 @@ import {
   CatalogProduct,
   ExportFormat,
   GeneratedReview,
+  ReviewLanguage,
 } from '../types/reviews';
+import {
+  DatasetIntegrityReport,
+  detectTextLanguageHeuristic,
+  QualityScorecard,
+} from './datasetIntegrity';
 
 export function parseCSVLine(line: string): string[] {
   const result: string[] = [];
@@ -180,6 +186,7 @@ function extractBusinessHintFromFilename(filename?: string): string {
 
 export interface ParsedCatalogResult {
   products: CatalogProduct[];
+  importedReviews: GeneratedReview[];
   detectedFormat: CatalogFormat;
   detectedStoreBaseUrl: string;
   detectedBusinessHint: string;
@@ -225,6 +232,7 @@ export function parseCatalogCSV(rawText: string, filename?: string): ParsedCatal
   if (!cleanText) {
     return {
       products: [],
+      importedReviews: [],
       detectedFormat: 'standard',
       detectedStoreBaseUrl: '',
       detectedBusinessHint,
@@ -236,6 +244,7 @@ export function parseCatalogCSV(rawText: string, filename?: string): ParsedCatal
   if (lines.length === 0) {
     return {
       products: [],
+      importedReviews: [],
       detectedFormat: 'standard',
       detectedStoreBaseUrl: '',
       detectedBusinessHint,
@@ -282,6 +291,31 @@ export function parseCatalogCSV(rawText: string, filename?: string): ParsedCatal
   const urlIdx = normalizedHeaders.findIndex((h) => URL_HEADERS.has(h));
   const picIdx = normalizedHeaders.findIndex((h) => PICTURE_HEADERS.has(h));
 
+  // Optional existing-review columns (so uploading an existing review CSV preserves ALL reviews for audit & AI remediation!)
+  const reviewBodyIdx = normalizedHeaders.findIndex((h) =>
+    ['body', 'review_body', 'review', 'comment', 'content', 'feedback', 'text'].includes(h)
+  );
+  const reviewSubjectIdx = normalizedHeaders.findIndex((h) =>
+    isJudgeMe
+      ? h === 'title' || h === 'subject' || h === 'review_title'
+      : ['subject', 'review_title', 'headline'].includes(h)
+  );
+  const reviewStarsIdx = normalizedHeaders.findIndex((h) =>
+    ['stars', 'rating', 'score', 'star_rating'].includes(h)
+  );
+  const reviewerEmailIdx = normalizedHeaders.findIndex((h) =>
+    ['reviewer_email', 'email', 'customer_email', 'author_email'].includes(h)
+  );
+  const reviewerNameIdx = normalizedHeaders.findIndex((h) =>
+    ['reviewer_name', 'customer_name', 'author', 'reviewer'].includes(h)
+  );
+  const reviewDateIdx = normalizedHeaders.findIndex((h) =>
+    ['review_date', 'date', 'created_at', 'submitted_at', 'timestamp'].includes(h)
+  );
+  const reviewLangIdx = normalizedHeaders.findIndex((h) =>
+    ['language', 'lang', 'locale'].includes(h)
+  );
+
   const hasRecognizedHeader =
     isJudgeMe ||
     isShopifyExport ||
@@ -326,6 +360,7 @@ export function parseCatalogCSV(rawText: string, filename?: string): ParsedCatal
   }
 
   const products: CatalogProduct[] = [];
+  const importedReviews: GeneratedReview[] = [];
   const seen = new Set<string>();
   const errors: string[] = [];
   let detectedStoreBaseUrl = '';
@@ -355,23 +390,84 @@ export function parseCatalogCSV(rawText: string, filename?: string): ParsedCatal
 
     if (!item_name) continue;
 
-    const rowNumber = products.length + 1;
-    const item_id = rawId.trim() || String(rowNumber);
-    const item_slug = rawSlug.trim() || slugifyProductName(item_name, rowNumber);
-
-    // Deduplicate Shopify variant rows (same handle) and repeated Judge.me product rows
-    const dedupeKey =
-      detectedFormat === 'shopify' || detectedFormat === 'judge_me'
-        ? item_slug.toLowerCase()
-        : `${item_id}::${item_slug.toLowerCase()}`;
-    if (seen.has(dedupeKey)) continue;
-    seen.add(dedupeKey);
-
     const cleanCat = rawCat
       .split(',')[0]
       .split('>')[0]
       .trim();
+    const fallbackNumber = products.length + 1;
+    const item_id = rawId.trim() || String(fallbackNumber);
+    const item_slug = rawSlug.trim() || slugifyProductName(item_name, fallbackNumber);
     const category = cleanCat || inferCategoryFromHandleOrName(item_name, item_slug);
+
+    // Check if this CSV row also carries an existing customer review
+    const rawBody = reviewBodyIdx !== -1 ? (cols[reviewBodyIdx] || '').trim() : '';
+    const rawStarsStr = reviewStarsIdx !== -1 ? (cols[reviewStarsIdx] || '').trim() : '';
+    if (rawBody.length > 0) {
+      const parsedStars = Math.max(1, Math.min(5, Math.round(Number(rawStarsStr) || 5)));
+      const rawSubj = reviewSubjectIdx !== -1 ? (cols[reviewSubjectIdx] || '').trim() : '';
+      const rawEmail = reviewerEmailIdx !== -1 ? (cols[reviewerEmailIdx] || '').trim() : '';
+      const rawReviewerName =
+        reviewerNameIdx !== -1 && cols[reviewerNameIdx]?.trim()
+          ? cols[reviewerNameIdx].trim()
+          : rawEmail.includes('@')
+            ? rawEmail
+                .split('@')[0]
+                .replace(/[._0-9]+/g, ' ')
+                .trim()
+                .replace(/\b\w/g, (c) => c.toUpperCase()) || 'Customer'
+            : 'Customer';
+      const rawDateField = reviewDateIdx !== -1 ? (cols[reviewDateIdx] || '').trim() : '';
+      const isoDateMatch = rawDateField.match(/^\d{4}-\d{2}-\d{2}/);
+      const reviewDate = isoDateMatch
+        ? isoDateMatch[0]
+        : new Date().toISOString().split('T')[0];
+      const explicitLang = reviewLangIdx !== -1 ? (cols[reviewLangIdx] || '').trim().toLowerCase() : '';
+      const guessedLang: ReviewLanguage =
+        (['en', 'fr', 'nl', 'de', 'es', 'it', 'pt', 'ar', 'darija_latin'].includes(explicitLang)
+          ? (explicitLang as ReviewLanguage)
+          : detectTextLanguageHeuristic(`${rawSubj} ${rawBody}`)) || 'en';
+
+      importedReviews.push({
+        id: `imported-row-${i + 1}-${Math.random().toString(36).slice(2, 6)}`,
+        item_id,
+        item_slug,
+        item_name,
+        category,
+        reviewer_name: rawReviewerName,
+        reviewer_email: rawEmail || `reviewer.row${i + 1}@example.com`,
+        stars: parsedStars,
+        subject: rawSubj,
+        body: rawBody,
+        review_date: reviewDate,
+        review_timestamp: rawDateField.includes('UTC') ? rawDateField : `${reviewDate} 12:00:00 UTC`,
+        product_url: rawUrl.trim(),
+        picture_urls: rawPic.trim(),
+        voice: rawBody.split(/\s+/).length <= 12 ? 'minimalist' : 'casual',
+        language: guessedLang,
+        isReturningCustomer: false,
+        sourceOrigin: 'imported_unverified',
+        sourceVerified: false,
+        originalRowNumber: i + 1,
+        originalSnapshot: {
+          item_id,
+          item_slug,
+          item_name,
+          category,
+          reviewer_name: rawReviewerName,
+          reviewer_email: rawEmail,
+          stars: parsedStars,
+          subject: rawSubj,
+          body: rawBody,
+          review_date: reviewDate,
+        },
+        modificationLog: [],
+      });
+    }
+
+    // Deduplicate Shopify variant rows (same handle) and repeated Judge.me / review product rows
+    const dedupeKey = item_slug.toLowerCase();
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
 
     products.push({
       item_id,
@@ -383,14 +479,27 @@ export function parseCatalogCSV(rawText: string, filename?: string): ParsedCatal
     });
   }
 
+  // Mark returning customer flag accurately on imported review sets
+  if (importedReviews.length > 0) {
+    const emailFreq = new Map<string, number>();
+    for (const r of importedReviews) {
+      const k = r.reviewer_email.trim().toLowerCase();
+      emailFreq.set(k, (emailFreq.get(k) || 0) + 1);
+    }
+    for (const r of importedReviews) {
+      r.isReturningCustomer = (emailFreq.get(r.reviewer_email.trim().toLowerCase()) || 0) > 1;
+    }
+  }
+
   if (products.length === 0) {
     errors.push(
-      'No valid product rows found. Upload a Judge.me CSV, Shopify Products CSV, or any CSV with product names/handles.'
+      'No valid product or review rows found. Upload a Judge.me CSV, Shopify CSV, or review dataset CSV.'
     );
   }
 
   return {
     products,
+    importedReviews,
     detectedFormat,
     detectedStoreBaseUrl,
     detectedBusinessHint,
@@ -645,6 +754,195 @@ export function downloadExportFile(
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+export function maskCustomerEmail(email: string): string {
+  const trimmed = email.trim();
+  const atIdx = trimmed.indexOf('@');
+  if (atIdx <= 0) return 'redacted@privacy.local';
+  const local = trimmed.slice(0, atIdx);
+  const domain = trimmed.slice(atIdx + 1);
+  if (local.length <= 2) return `${local[0] || '*'}***@${domain}`;
+  return `${local[0]}***${local[local.length - 1]}@${domain}`;
+}
+
+export function applyPrivacyMaskIfEnabled(
+  reviews: GeneratedReview[],
+  maskEmails: boolean
+): GeneratedReview[] {
+  if (!maskEmails) return reviews;
+  return reviews.map((r) => ({
+    ...r,
+    reviewer_email: maskCustomerEmail(r.reviewer_email),
+  }));
+}
+
+export function serializeRejectedReviewsToCSV(
+  rejectedReviews: GeneratedReview[],
+  format: ExportFormat,
+  storeBaseUrl?: string,
+  maskEmails = false
+): string {
+  const prepared = applyPrivacyMaskIfEnabled(rejectedReviews, maskEmails);
+  if (format === 'judge_me') {
+    const header =
+      'title,body,rating,review_date,reviewer_name,reviewer_email,product_url,picture_urls,product_id,product_handle,qc_status,qc_reason';
+    const rows = prepared.map((r) =>
+      [
+        escapeCSVField(r.subject),
+        escapeCSVField(r.body),
+        r.stars,
+        escapeCSVField(r.review_timestamp || `${r.review_date} 12:00:00 UTC`),
+        escapeCSVField(r.reviewer_name),
+        escapeCSVField(r.reviewer_email),
+        escapeCSVField(resolveProductUrl(r, storeBaseUrl)),
+        escapeCSVField(r.picture_urls || ''),
+        escapeCSVField(r.item_id),
+        escapeCSVField(r.item_slug),
+        escapeCSVField(r.needsManualVerification ? 'flagged_manual_review' : 'rejected'),
+        escapeCSVField(r.rejectionReason || r.manualVerificationNote || 'Failed mandatory QC checks'),
+      ].join(',')
+    );
+    return [header, ...rows].join('\n');
+  }
+
+  const header =
+    'item_id,item_slug,item_name,category,reviewer_email,stars,subject,body,review_date,qc_status,qc_reason';
+  const rows = prepared.map((r) =>
+    [
+      escapeCSVField(r.item_id),
+      escapeCSVField(r.item_slug),
+      escapeCSVField(r.item_name),
+      escapeCSVField(r.category),
+      escapeCSVField(r.reviewer_email),
+      r.stars,
+      escapeCSVField(r.subject),
+      escapeCSVField(r.body),
+      escapeCSVField(r.review_date),
+      escapeCSVField(r.needsManualVerification ? 'flagged_manual_review' : 'rejected'),
+      escapeCSVField(r.rejectionReason || r.manualVerificationNote || 'Failed mandatory QC checks'),
+    ].join(',')
+  );
+  return [header, ...rows].join('\n');
+}
+
+export function generateQualityControlReportMarkdown(opts: {
+  businessLabel: string;
+  scannedUrl?: string;
+  activeReviews: GeneratedReview[];
+  rejectedReviews: GeneratedReview[];
+  integrity: DatasetIntegrityReport;
+  baselineScorecard?: QualityScorecard | null;
+}): string {
+  const { businessLabel, scannedUrl, activeReviews, rejectedReviews, integrity, baselineScorecard } = opts;
+  const sc = integrity.scorecard;
+  const before = baselineScorecard;
+  const gates = sc.mandatoryGates;
+  const nowIso = new Date().toISOString().split('T')[0];
+
+  const fmt10 = (v: number) => `${v.toFixed(1)}/10`;
+  const fmt100 = (v: number) => `${v}/100`;
+
+  const modRows: string[] = [];
+  for (const r of activeReviews) {
+    for (const m of r.modificationLog || []) {
+      modRows.push(
+        `| ${r.originalRowNumber ?? r.id.slice(0, 8)} | \`${m.field}\` | ${m.before.slice(0, 48).replace(/\|/g, '/')} | ${m.after.slice(0, 48).replace(/\|/g, '/')} | ${m.reason.replace(/\|/g, '/')} |`
+      );
+    }
+  }
+
+  const affectedRows: string[] = [];
+  activeReviews.forEach((r, idx) => {
+    const issues = integrity.issuesByReviewId[r.id] || [];
+    if (issues.length > 0) {
+      affectedRows.push(
+        `- **Row #${r.originalRowNumber ?? idx + 1}** (\`${r.item_slug}\`, ${r.stars}★, \`${r.language}\`): ${issues
+          .map((i) => `[${i.severity.toUpperCase()}] ${i.detail}`)
+          .join(' — ')}`
+      );
+    }
+  });
+
+  const manualVerificationItems = [
+    ...activeReviews
+      .filter((r) => !r.sourceVerified || r.needsManualVerification)
+      .map(
+        (r, i) =>
+          `- **Active Row #${r.originalRowNumber ?? i + 1}** (\`${r.item_name}\`, ${r.stars}★): ${
+            r.manualVerificationNote ||
+            'Verify customer review date and identity against internal intervention/order records before publishing.'
+          }`
+      ),
+    ...rejectedReviews.map(
+      (r, i) =>
+        `- **Excluded/Flagged Row #${r.originalRowNumber ?? i + 1}** (\`${r.item_name}\`, ${r.stars}★): ${
+          r.rejectionReason || 'Excluded from publication dataset pending manual source verification.'
+        }`
+    ),
+  ];
+
+  return [
+    `# Customer Review Quality & Authenticity Audit Report`,
+    ``,
+    `- **Business:** ${businessLabel}${scannedUrl ? ` (${scannedUrl})` : ''}`,
+    `- **Audit Date:** ${nowIso}`,
+    `- **Publication Status:** ${sc.publicationApproved ? 'APPROVED FOR PUBLICATION' : 'HOLD — MANUAL VERIFICATION / REMEDIATION REQUIRED'}`,
+    `- **Publication-Ready Reviews:** ${activeReviews.filter((r) => r.sourceVerified).length} verified (${activeReviews.length} active in workbench)`,
+    `- **Rejected / Flagged Reviews:** ${rejectedReviews.length}`,
+    ``,
+    `## 1. Weighted Quality-Control Scorecard (Target: >= 90/100)`,
+    ``,
+    `| Dimension | Weight | ${before ? 'Before' : 'Baseline'} | Current Score | Status |`,
+    `| :--- | :---: | :---: | :---: | :---: |`,
+    `| Source Authenticity & Verification | 30% | ${before ? fmt100(before.sourceAuthenticity100) : '—'} | **${fmt100(sc.sourceAuthenticity100)}** | ${sc.sourceAuthenticity100 >= 90 ? 'PASS' : 'NEEDS VERIFICATION'} |`,
+    `| Content Originality | 20% | ${before ? fmt100(before.originality100) : '—'} | **${fmt100(sc.originality100)}** | ${sc.originality100 >= 90 ? 'PASS' : 'REVIEW'} |`,
+    `| Natural Language Quality | 15% | ${before ? fmt100(before.naturalLanguage100) : '—'} | **${fmt100(sc.naturalLanguage100)}** | ${sc.naturalLanguage100 >= 90 ? 'PASS' : 'REVIEW'} |`,
+    `| Service Relevance & Accuracy | 15% | ${before ? fmt100(before.serviceRelevance100) : '—'} | **${fmt100(sc.serviceRelevance100)}** | ${sc.serviceRelevance100 >= 90 ? 'PASS' : 'REVIEW'} |`,
+    `| Data Consistency | 10% | ${before ? fmt100(before.dataConsistency100) : '—'} | **${fmt100(sc.dataConsistency100)}** | ${sc.dataConsistency100 >= 90 ? 'PASS' : 'REVIEW'} |`,
+    `| Multilingual Quality | 10% | ${before ? fmt100(before.multilingual100) : '—'} | **${fmt100(sc.multilingual100)}** | ${sc.multilingual100 >= 90 ? 'PASS' : 'REVIEW'} |`,
+    `| **Weighted Total Score** | **100%** | **${before ? fmt100(before.weightedTotal100) : '—'}** | **${fmt100(sc.weightedTotal100)}** | **${sc.publicationApproved ? 'APPROVED' : 'GATED'}** |`,
+    ``,
+    `## 2. Benchmark Criteria Comparison (0–10 Scale)`,
+    ``,
+    `| Criteria | ${before ? 'Before Score' : 'Baseline'} | After Score | Target |`,
+    `| :--- | :---: | :---: | :---: |`,
+    `| Natural language | ${before ? fmt10(before.rubric10.naturalLanguage) : '—'} | **${fmt10(sc.rubric10.naturalLanguage)}** | 9.0/10 |`,
+    `| Originality | ${before ? fmt10(before.rubric10.originality) : '—'} | **${fmt10(sc.rubric10.originality)}** | 9.0/10 |`,
+    `| Technical relevance | ${before ? fmt10(before.rubric10.technicalRelevance) : '—'} | **${fmt10(sc.rubric10.technicalRelevance)}** | 9.5/10 |`,
+    `| Service categorization | ${before ? fmt10(before.rubric10.serviceCategorization) : '—'} | **${fmt10(sc.rubric10.serviceCategorization)}** | 10.0/10 |`,
+    `| Overall quality | ${before ? fmt10(before.rubric10.overallQuality) : '—'} | **${fmt10(sc.rubric10.overallQuality)}** | 9.0+/10 |`,
+    ``,
+    `## 3. Mandatory Publication Conditions`,
+    ``,
+    `- [${gates.zeroExactDuplicates ? 'x' : ' '}] Zero unresolved exact duplicate reviews (${integrity.exactDuplicateCount} found)`,
+    `- [${gates.zeroHeadingServices ? 'x' : ' '}] Zero incorrect website headings/CTAs used as services (${integrity.insertedHeadingCount} found)`,
+    `- [${gates.zeroMixedLanguageLabels ? 'x' : ' '}] Zero automatically inserted mixed-language service labels (${integrity.mixedLanguageServiceCount} found)`,
+    `- [${gates.zeroFabricatedOrOffDomain ? 'x' : ' '}] Zero off-domain or broken-grammar template splices (${integrity.offDomainCount + integrity.brokenGrammarCount} found)`,
+    `- [${gates.allServicesVerifiedOrFlagged ? 'x' : ' '}] All service assignments verified or flagged (${integrity.incorrectServiceCount} mismatched)`,
+    `- [${gates.allUnsupportedExcludedAndVerified ? 'x' : ' '}] All unsupported reviews excluded & source records verified (${integrity.unverifiedSourceCount} unverified, ${integrity.ratingMismatchCount} rating-sentiment flags)`,
+    ``,
+    `## 4. Affected Rows & Diagnostic Findings`,
+    ``,
+    affectedRows.length > 0 ? affectedRows.slice(0, 80).join('\n') : '_Zero unresolved content or mapping issues on active rows._',
+    ``,
+    `## 5. Modification Audit Trail`,
+    ``,
+    modRows.length > 0
+      ? [
+          `| Row | Field | Before | After | Reason |`,
+          `| :--- | :--- | :--- | :--- | :--- |`,
+          ...modRows.slice(0, 120),
+        ].join('\n')
+      : '_No automated field modifications recorded yet._',
+    ``,
+    `## 6. Summary of Remaining Issues Requiring Manual Verification`,
+    ``,
+    manualVerificationItems.length > 0
+      ? manualVerificationItems.slice(0, 60).join('\n')
+      : '_All active rows have passed validation checks and been verified against source records._',
+    ``,
+  ].join('\n');
 }
 
 export function downloadCSV(csvContent: string, filename: string): void {

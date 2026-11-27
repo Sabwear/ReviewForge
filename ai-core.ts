@@ -628,27 +628,47 @@ export async function generateJsonWithAI<T = Record<string, unknown>>(
 export const VOICE_PACK_JSON_HINT = `{
   "detectedBusinessName": "2-5 word business label",
   "businessSummary": "One concise sentence summarizing the business and its core offerings.",
-  "productClassifications": [{ "item_slug": "slug", "cleanName": "Display Name", "category": "Category" }],
-  "categoryContext": [{ "category": "Category", "language": "en", "contextA": ["5-6 scenarios"], "contextB": ["5-6 qualities"], "openers": ["4-5 sentences"], "middles": ["4-5 sentences"] }],
+  "detectedCountryCode": "ISO-2 country code if regional (e.g. BE, FR, NL, DE, GB, MA, US) or empty string",
+  "productClassifications": [{ "item_slug": "slug", "cleanName": "Display Name", "category": "Specific Sub-Category" }],
+  "offeringContexts": [{
+    "item_slug": "slug",
+    "language": "en",
+    "localizedName": "natural phrase in this exact language (never mixed-language)",
+    "distinctiveKeywords": ["3-5 domain terms unique to this exact offering"],
+    "scenarios": ["3-4 distinct natural opening sentences describing why a customer needed THIS specific offering"],
+    "actions": ["3-4 distinct natural middle sentences describing what was done/delivered for THIS specific offering"],
+    "outcomes": ["3-4 distinct natural outcome sentences for THIS specific offering"]
+  }],
+  "categoryContext": [{ "category": "Specific Sub-Category", "language": "en", "contextA": ["5-6 lowercase noun-phrase scenarios"], "contextB": ["5-6 lowercase noun-phrase qualities"], "openers": ["4-5 sentences"], "middles": ["4-5 sentences"] }],
   "languagePacks": [{
     "language": "en",
-    "tokens": { "contextA": ["6-8 items"], "contextB": ["6-8 items"], "duration": ["5-7 items"], "timeframe": ["5-6 items like 24h, 2 days"] },
-    "stars": [{ "star": 5, "subjects": ["5-8 titles"], "openers": ["5-7 sentences"], "middles": ["4-6 sentences"], "closers": ["3-5 sentences"] }],
+    "tokens": { "contextA": ["6-8 lowercase noun phrases"], "contextB": ["6-8 lowercase noun phrases"], "duration": ["5-7 items"], "timeframe": ["5-6 items like 24h, 2 days"] },
+    "stars": [{ "star": 5, "subjects": ["5-8 plain customer titles"], "openers": ["5-7 sentences"], "middles": ["4-6 sentences"], "closers": ["3-5 sentences"] }],
     "extraTails": ["5-6 short follow-up sentences"]
   }]
 }`;
 
 export const SCAN_WEBSITE_JSON_HINT = `{
   "businessType": "service or ecommerce",
-  "discoveredItems": [{ "item_name": "Offering Name", "item_slug": "offering-slug", "category": "Category", "product_url": "https://..." }],
+  "detectedCountryCode": "ISO-2 country code if regional (e.g. BE, FR, NL, DE, GB, MA, US) or empty string",
+  "discoveredItems": [{ "item_name": "Actual Service or Product Name", "item_slug": "offering-slug", "category": "Specific Sub-Category", "product_url": "https://..." }],
   "detectedBusinessName": "2-5 word business label",
   "businessSummary": "One concise sentence summarizing the business.",
-  "productClassifications": [{ "item_slug": "offering-slug", "cleanName": "Offering Name", "category": "Category" }],
-  "categoryContext": [{ "category": "Category", "language": "en", "contextA": ["5-6 scenarios"], "contextB": ["5-6 qualities"], "openers": ["4-5 sentences"], "middles": ["4-5 sentences"] }],
+  "productClassifications": [{ "item_slug": "offering-slug", "cleanName": "Actual Service or Product Name", "category": "Specific Sub-Category" }],
+  "offeringContexts": [{
+    "item_slug": "offering-slug",
+    "language": "en",
+    "localizedName": "natural phrase in this exact language (never untranslated foreign labels)",
+    "distinctiveKeywords": ["3-5 domain terms unique to this exact offering"],
+    "scenarios": ["3-4 distinct natural opening sentences strictly for THIS offering"],
+    "actions": ["3-4 distinct natural middle sentences strictly for THIS offering"],
+    "outcomes": ["3-4 distinct natural outcome sentences strictly for THIS offering"]
+  }],
+  "categoryContext": [{ "category": "Specific Sub-Category", "language": "en", "contextA": ["5-6 lowercase noun-phrase scenarios"], "contextB": ["5-6 lowercase noun-phrase qualities"], "openers": ["4-5 sentences"], "middles": ["4-5 sentences"] }],
   "languagePacks": [{
     "language": "en",
-    "tokens": { "contextA": ["6-8 items"], "contextB": ["6-8 items"], "duration": ["5-7 items"], "timeframe": ["5-6 items"] },
-    "stars": [{ "star": 5, "subjects": ["5-8 titles"], "openers": ["5-7 sentences"], "middles": ["4-6 sentences"], "closers": ["3-5 sentences"] }],
+    "tokens": { "contextA": ["6-8 lowercase noun phrases"], "contextB": ["6-8 lowercase noun phrases"], "duration": ["5-7 items"], "timeframe": ["5-6 items"] },
+    "stars": [{ "star": 5, "subjects": ["5-8 plain customer titles"], "openers": ["5-7 sentences"], "middles": ["4-6 sentences"], "closers": ["3-5 sentences"] }],
     "extraTails": ["5-6 short follow-up sentences"]
   }]
 }`;
@@ -656,21 +676,31 @@ export const SCAN_WEBSITE_JSON_HINT = `{
 export interface ReviewAuditInput {
   id: string;
   item_name: string;
+  item_slug?: string;
   category: string;
   stars: number;
   language: string;
   subject: string;
   body: string;
+  issues?: string[];
+}
+
+export interface ValidOfferingOption {
+  item_id: string;
+  item_slug: string;
+  item_name: string;
+  category: string;
 }
 
 export interface ReviewAuditResult {
   id: string;
-  humanScore: number; // 0-100 (higher = more human & domain-accurate)
+  humanScore: number; // 0-100 (higher = more authentic, original & domain-accurate)
   verdict: 'human' | 'generic' | 'ai_flagged';
   reason: string;
   signals: string[];
   flaggedPhrases: string[];
   suggestion: string;
+  suggestedItemSlug?: string;
   dimensions: {
     naturalTone: number;
     domainFit: number;
@@ -682,45 +712,56 @@ export async function detectReviewsWithAI(
   payload: AIConfigPayload | undefined,
   env: ServerAIEnv,
   reviews: ReviewAuditInput[],
-  businessContext: string
+  businessContext: string,
+  validOfferings?: ValidOfferingOption[]
 ): Promise<{ results: ReviewAuditResult[]; usage: AIUsageMetrics }> {
   const batch = reviews.slice(0, 35);
   const formatted = batch
     .map(
       (r) =>
-        `ID="${r.id}" | Lang=${r.language} | Stars=${r.stars} | Offering="${r.item_name}" (${r.category}) | Title="${r.subject}" | Body="${r.body}"`
+        `ID="${r.id}" | Lang=${r.language} | Stars=${r.stars} | AssignedOffering="${r.item_name}" [slug=${r.item_slug || ''}, cat=${r.category}] | Title="${r.subject}" | Body="${r.body}"${r.issues?.length ? ` | PreDetectedIssues=[${r.issues.join('; ')}]` : ''}`
     )
     .join('\n');
 
-  const prompt = `Audit these generated customer reviews in depth for authenticity, natural human phrasing, and business-domain accuracy.
+  const offeringsList =
+    validOfferings && validOfferings.length > 0
+      ? `\nValid offerings on this website:\n${validOfferings.map((o) => `- slug="${o.item_slug}" | name="${o.item_name}" | category="${o.category}"`).join('\n')}\n`
+      : '';
 
-Business context: ${businessContext || '(Infer from offerings — pay close attention to whether this is a SERVICE business like plumbing/heating/clinic/agency vs an e-commerce store)'}
+  const prompt = `Audit these customer reviews strictly for authenticity, dataset-wide originality, service-mapping accuracy, natural language, rating-sentiment consistency, and multilingual quality.
 
+Business context: ${businessContext || '(Infer from offerings — distinguish exact sub-services accurately)'}
+${offeringsList}
 Reviews to audit:
 ${formatted}
 
-SCORING RULES (strict — prioritize genuine customer feedback over quantity/SEO):
-- Give LOW humanScore (10–49, verdict="ai_flagged") if a review:
-  * Uses an automatically inserted website heading, slogan, navigation label, or city name as the service/product.
-  * Uses e-commerce/shipping/packaging/gift wording ("bought", "shipping", "box", "packaging", "colis", "emballage", "cet article", "dit artikel", "cadeau") for a SERVICE business, OR describes a different service than assigned.
-  * Contains repeated sentence templates, broken grammar, mixed-language untranslated service names inside a non-English review, or promotional/marketing expressions ("game-changer", "exceeded expectations", "worth every penny", "stress-free").
-  * Sounds fabricated or unsupported rather than grounded in a genuine customer experience.
-- Give MEDIUM humanScore (50–74, verdict="generic") if it is grammatically fine but too vague/template-like to verify as genuine customer feedback.
-- Give HIGH humanScore (75–98, verdict="human") ONLY if it reads like genuine, plain-spoken customer feedback with accurate service assignment and original tone.
+STRICT QUALITY-CONTROL SCORING RULES:
+- Give LOW humanScore (10–49, verdict="ai_flagged") if ANY of these apply:
+  1) Website heading, CTA, slogan, navigation hub, or city name is used as AssignedOffering (e.g., "Tell us what you need", "Our services", "Care that suits your home").
+  2) SERVICE MISMATCH: The review describes a different intervention/product than AssignedOffering (e.g., describes an emergency repair/breakdown/error code/valve swap while assigned to Maintenance, New Installation, or Heat Pumps; or describes a pipe leak while assigned to Installation; or uses e-commerce shipping/box words on a service business). If another slug in Valid offerings fits better, return it in suggestedItemSlug!
+  3) MIXED-LANGUAGE LABEL OR MECHANICAL INSERTION: Untranslated English/foreign service label pasted into a non-English sentence (e.g., "Onze aanvraag voor Heat pumps", "Nous avons demandé Boiler repair") or awkward mechanical insertion ("Fixed Plumbing installation same day").
+  4) RATING-SENTIMENT INCONSISTENCY: e.g., 1–3 star rating paired with glowing 5-star praise ("Très content", "Great experience"), or 5-star rating with unresolved complaint.
+  5) ARTIFICIAL TYPOS OR BROKEN GRAMMAR: Deliberate fake typos/chat slang ("reccomend", "definately", "afsprak", "vrmt", "thx", "tho") or broken mid-sentence capital splices.
+- Give MEDIUM humanScore (50–79, verdict="generic") if:
+  * Shares identical openings, endings, sentence structures, or translated scenario clones with other rows in this batch.
+  * Repeats the company name unnecessarily/promotionally or uses marketing clichés ("exceeded expectations", "top-tier", "worth every penny", "game-changer", "stress-free").
+  * Too vague/template-like to tell which specific service was performed.
+- Give HIGH humanScore (85–98, verdict="human") ONLY if it reads like genuine, plain-spoken feedback in pure native phrasing, matches the EXACT assigned sub-service, aligns with its star rating, and is structurally distinct from the rest of the batch.
 
 For EVERY review ID, return:
 - humanScore (0-100) and verdict ("human" | "generic" | "ai_flagged")
 - dimensions: naturalTone (0-100), domainFit (0-100), specificity (0-100)
-- reason: clear 1-sentence explanation of WHY it passed or should be excluded
-- signals: 2-3 short tags (e.g. "Inserted heading", "Repeated template", "Broken grammar", "Mixed-language service", "Promotional wording", "Wrong service assignment", "Genuine customer tone")
-- flaggedPhrases: exact quoted words/phrases that look promotional, broken, mixed-language, or off-domain (empty array [] if genuine)
-- suggestion: recommend excluding if unsupported/fabricated, or a concrete preservation note if genuine`;
+- reason: clear 1-sentence forensic explanation
+- signals: 2-3 short diagnostic tags
+- flaggedPhrases: exact quoted problematic phrases (empty array [] if clean)
+- suggestedItemSlug: exact valid slug if the review belongs to a different offering, or "" if current assignment is accurate
+- suggestion: concrete remediation note`;
 
   const { data, usage } = await generateJsonWithAI<{ results?: Partial<ReviewAuditResult>[] }>(payload, env, {
     systemInstruction:
-      'You are a strict multilingual review authenticity detector and forensic QA editor. Return rich, structured diagnostics explaining exactly WHY each review passed or was flagged.',
+      'You are a strict multilingual customer review quality & authenticity auditor. Never award high scores to repetitive templates, wrong sub-service assignments, mixed-language labels, or promotional copy.',
     prompt,
-    jsonShapeHint: `{ "results": [{ "id": "exact-id", "humanScore": 42, "verdict": "ai_flagged", "reason": "Mentions shipping box and packaging for a plumbing repair service.", "signals": ["Off-domain wording", "E-commerce template"], "flaggedPhrases": ["shipping box", "packaging"], "suggestion": "Replace shipping mention with technician punctuality and repair quality.", "dimensions": { "naturalTone": 65, "domainFit": 18, "specificity": 40 } }] }`,
+    jsonShapeHint: `{ "results": [{ "id": "exact-id", "humanScore": 42, "verdict": "ai_flagged", "reason": "Describes emergency boiler valve repair while assigned to Boiler installation.", "signals": ["Wrong service assignment", "Repeated scenario"], "flaggedPhrases": ["swapped out the worn valve"], "suggestedItemSlug": "boiler-repair", "suggestion": "Remap to boiler-repair or align text with actual installation work.", "dimensions": { "naturalTone": 72, "domainFit": 25, "specificity": 60 } }] }`,
   });
 
   const clamp = (n: unknown, fb: number) =>
@@ -729,21 +770,22 @@ For EVERY review ID, return:
   const normalized: ReviewAuditResult[] = (data?.results || []).map((r) => {
     const score = clamp(r.humanScore, 50);
     const verdict: ReviewAuditResult['verdict'] =
-      score >= 75 ? 'human' : score >= 50 ? 'generic' : 'ai_flagged';
+      score >= 82 ? 'human' : score >= 50 ? 'generic' : 'ai_flagged';
     return {
       id: String(r.id || ''),
       humanScore: score,
       verdict,
-      reason: String(r.reason || '').slice(0, 180) || 'Evaluated by AI detector.',
+      reason: String(r.reason || '').slice(0, 220) || 'Evaluated by AI quality auditor.',
       signals: Array.isArray(r.signals)
         ? r.signals.map((s) => String(s).trim()).filter(Boolean).slice(0, 4)
         : [],
       flaggedPhrases: Array.isArray(r.flaggedPhrases)
         ? r.flaggedPhrases.map((p) => String(p).trim()).filter(Boolean).slice(0, 5)
         : [],
+      suggestedItemSlug: typeof r.suggestedItemSlug === 'string' ? r.suggestedItemSlug.trim() : undefined,
       suggestion:
-        String(r.suggestion || '').slice(0, 180) ||
-        (verdict === 'human' ? 'Looks authentic — ready to export.' : 'Rewrite with specific business details.'),
+        String(r.suggestion || '').slice(0, 200) ||
+        (verdict === 'human' ? 'Passes quality checks — verify source record before publishing.' : 'Remediate service mapping and phrasing.'),
       dimensions: {
         naturalTone: clamp(r.dimensions?.naturalTone, score),
         domainFit: clamp(r.dimensions?.domainFit, score),
@@ -755,55 +797,100 @@ For EVERY review ID, return:
   return { results: normalized, usage };
 }
 
+export interface RemediatedReviewOutput {
+  id: string;
+  subject: string;
+  body: string;
+  matched_item_slug?: string;
+  needsManualVerification?: boolean;
+  manualNote?: string;
+  changeSummary?: string;
+}
+
 export async function rewriteReviewsWithAI(
   payload: AIConfigPayload | undefined,
   env: ServerAIEnv,
   reviews: ReviewAuditInput[],
-  businessContext: string
-): Promise<{ rewrites: Array<{ id: string; subject: string; body: string }>; usage: AIUsageMetrics }> {
+  businessContext: string,
+  opts?: {
+    validOfferings?: ValidOfferingOption[];
+    avoidOpenings?: string[];
+    detectedCountryCode?: string;
+  }
+): Promise<{ rewrites: RemediatedReviewOutput[]; usage: AIUsageMetrics }> {
   const batch = reviews.slice(0, 20);
   const formatted = batch
     .map(
       (r) =>
-        `ID="${r.id}" | Lang=${r.language} | Stars=${r.stars} | Offering="${r.item_name}" (${r.category}) | OldTitle="${r.subject}" | OldBody="${r.body}"`
+        `ID="${r.id}" | Lang=${r.language} | Stars=${r.stars} (LOCKED — DO NOT CHANGE) | CurrentOffering="${r.item_name}" [slug=${r.item_slug || ''}, cat=${r.category}] | OldTitle="${r.subject}" | OldBody="${r.body}"${r.issues?.length ? ` | IssuesToFix=[${r.issues.join('; ')}]` : ''}`
     )
     .join('\n');
 
-  const prompt = `Rewrite these flagged customer reviews so they sound 100% like authentic, everyday human customers for this exact business.
+  const validOfferingsSection =
+    opts?.validOfferings && opts.validOfferings.length > 0
+      ? `\nVALID OFFERINGS ON WEBSITE (choose matched_item_slug ONLY from this list):\n${opts.validOfferings
+          .map((o) => `- slug="${o.item_slug}" | name="${o.item_name}" | category="${o.category}"`)
+          .join('\n')}\n`
+      : '';
 
-Business context: ${businessContext || '(Match the exact offerings — if plumbing/heating/repair/clinic/agency, write about booking an appointment, technician punctuality, diagnosis, clean work, fair quote — NEVER shipping/packaging/buying items!)'}
+  const avoidSection =
+    opts?.avoidOpenings && opts.avoidOpenings.length > 0
+      ? `\nEXISTING OPENINGS ALREADY USED IN DATASET (DO NOT start any review with similar words):\n${opts.avoidOpenings.slice(0, 25).map((s) => `- "${s}"`).join('\n')}\n`
+      : '';
 
-Flagged reviews to rewrite (keep the EXACT same language and star rating for each ID):
+  const regionHint = opts?.detectedCountryCode
+    ? `\nRegional context: Country=${opts.detectedCountryCode} (use authentic local phrasing for this country — e.g. if BE: Belgian French / Belgian Dutch / English; if CH: Swiss; if MA: Moroccan; if FR: France; if NL: Netherlands).\n`
+    : '';
+
+  const prompt = `Remediate and improve each flagged customer review below so the dataset achieves 9.5+/10 for authenticity, originality, technical/service accuracy, natural language, and multilingual quality.
+
+Business context: ${businessContext || '(Match exact offering domain)'}
+${regionHint}${validOfferingsSection}${avoidSection}
+Reviews to remediate:
 ${formatted}
 
-RULES:
-- Write in the EXACT language code specified (e.g. nl = natural Belgian/Dutch, fr = natural French, en = natural English, darija_latin = Moroccan Darija in Latin script).
-- To avoid generic reviews, weave concrete real-life details naturally into medium/detailed reviews:
-  1) What problem the customer experienced (strictly matching ONLY this specific offering and business niche — never invent unrelated problems!)
-  2) What the technician/specialist actually did — STRICTLY limited to the exact service this business offers (never mention unrelated trades, parts, or actions out of context!)
-  3) How the appointment went (clear timing, communication, transparent quote)
-  4) Whether the problem was resolved
-  5) 1–2 personal observations grounded in that exact service
-  6) Mention the SPECIFIC company name in ~40% of rewritten reviews so they clearly belong to this business and not any generic company!
-- Preserve plain, grounded customer language — NEVER introduce marketing expressions ("game-changer", "exceeded expectations", "worth every penny", "top-tier", "stress-free experience", "peace of mind", "second to none").
-- Still vary lengths naturally (some ultra-short 5–12 words, some 1–2 sentences, some detailed 3–4 sentences), use diverse titles, and include occasional natural human quirks (~20%: minor phone typos like "reccomend"/"tres"/"rdv", occasional lowercase or missing final period).
-- PRESERVE negative/mixed 1–3 star reviews honestly (minor scheduling wait, slight preference mismatch — never scam/fraud allegations).`;
+MANDATORY REMEDIATION RULES:
+1. SERVICE RELEVANCE & MAPPING (10/10 accuracy):
+   - If OldBody genuinely describes a specific valid offering from VALID OFFERINGS that differs from CurrentOffering (for example, describes an acute repair/fault while assigned to installation or maintenance, or describes a leak while assigned to heating), set "matched_item_slug" to that exact valid offering's slug AND keep the review's authentic scenario!
+   - If CurrentOffering was a website heading/CTA or mismatched template, assign a valid "matched_item_slug" and ensure every technical/practical detail strictly matches ONLY that specific offering (clearly distinguish repair vs. preventive maintenance/inspection vs. new equipment installation vs. leak/plumbing vs. heat pump/renewable vs. consultation/product!).
+   - NEVER mechanically insert raw service labels into sentences (never write "Fixed Plumbing installation" or "request for Heat pumps").
+2. MULTILINGUAL QUALITY (10/10):
+   - Write 100% in the exact language specified by Lang (never leave English service names inside French, Dutch, German, Spanish, or Arabic sentences!).
+   - Fix broken grammar, mid-sentence capital splices, and awkward machine-translated phrasing while keeping natural everyday customer vocabulary.
+   - NEVER artificially introduce spelling mistakes, typos ("reccomend", "afsprak", "tres", "vrmt"), chat abbreviations ("thx", "tho", "&"), or forced lowercase! Write clean, natural human prose.
+3. DATASET-WIDE ORIGINALITY (9.5+/10):
+   - Every review in this batch MUST have a completely different opening structure, sentence count (mix concise 1-sentence notes of 10–18 words, medium 2-sentence reviews of 22–38 words, and detailed 3-sentence reviews of 40–65 words), and ending!
+   - NEVER repeat technical descriptions across multiple reviews in the batch (do not reuse the same fault/part/fix twice).
+   - Avoid company-name stuffing: mention the company name in AT MOST 1 out of every 8 reviews (~12%), and NEVER put the company name in promotional titles ("Very satisfied with <Company>").
+   - Zero marketing clichés ("exceeded expectations", "worth every penny", "top-tier", "game-changer", "peace of mind", "second to none", "100% satisfied", "five stars well deserved").
+4. RATING & SENTIMENT HONESTY:
+   - Stars are LOCKED. Ensure Title and Body genuinely match the exact star level:
+     * 5★: Clear, grounded satisfaction.
+     * 4★: Positive result with a realistic minor nuance (e.g., slight arrival delay, waiting for a part, or brief scheduling coordination).
+     * 3★: Balanced neutral/mixed feedback (work completed fine, but noticeable wait time, communication gap, or higher-than-expected quote — NEVER use 5-star praise on a 3★ review!).
+     * 1–2★: Honest, non-defamatory frustration (rescheduled slot, slow callback, missed window — never scam/fraud accusations).`;
 
   const { data, usage } = await generateJsonWithAI<{
-    rewrites?: Array<{ id: string; subject: string; body: string }>;
+    rewrites?: RemediatedReviewOutput[];
   }>(payload, env, {
     systemInstruction:
-      'You are an expert multilingual human-voice copywriter who rewrites generic or off-domain reviews into authentic, natural, domain-accurate customer reviews.',
+      'You are a strict multilingual review quality & authenticity editor. You eliminate template repetition, mixed-language service labels, wrong sub-service assignments, promotional fluff, and artificial typos while preserving natural customer voice and exact star ratings.',
     prompt,
-    jsonShapeHint: `{ "rewrites": [{ "id": "exact-id", "subject": "Short natural title", "body": "Authentic human review body" }] }`,
+    jsonShapeHint: `{ "rewrites": [{ "id": "exact-id", "subject": "Plain natural title matching stars", "body": "Clean, non-repetitive, offering-accurate review in pure target language", "matched_item_slug": "valid-slug-from-list", "changeSummary": "Mapped to boiler-repair and removed mixed-language label" }] }`,
   });
 
   return {
-    rewrites: (data?.rewrites || []).map((r) => ({
-      id: String(r.id),
-      subject: String(r.subject || '').trim(),
-      body: String(r.body || '').trim(),
-    })),
+    rewrites: (data?.rewrites || [])
+      .filter((r) => r && r.id && r.body)
+      .map((r) => ({
+        id: String(r.id),
+        subject: String(r.subject || '').trim(),
+        body: String(r.body || '').trim(),
+        matched_item_slug: r.matched_item_slug ? String(r.matched_item_slug).trim() : undefined,
+        needsManualVerification: Boolean(r.needsManualVerification),
+        manualNote: r.manualNote ? String(r.manualNote).trim() : undefined,
+        changeSummary: r.changeSummary ? String(r.changeSummary).trim() : undefined,
+      })),
     usage,
   };
 }

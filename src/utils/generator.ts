@@ -33,6 +33,7 @@ import {
   CategoryVoiceContext,
   GeneratedReview,
   GeneratorConfig,
+  OfferingVoiceContext,
   ReviewLanguage,
   ReviewTemplate,
   ReviewerVoice,
@@ -43,6 +44,7 @@ import {
   buildDetailedServiceStory,
   buildUltraShortReview,
   EXTRA_DIVERSE_SUBJECTS,
+  getLocalizedOfferingPhrase,
   getServiceSpecificSentence,
 } from './humanizer';
 import { resolveProductUrl } from './csv';
@@ -251,25 +253,53 @@ function hydrateIPTVTokens(
     .replace(/\{bouquet\}/g, () => pickRandom(tokens.bouquet));
 }
 
+function sanitizeMidSentenceToken(val: string): string {
+  const trimmed = val.trim().replace(/[.!?]+$/, '').trim();
+  if (!trimmed) return trimmed;
+  // Lowercase leading sentence-case word (e.g. "When the hot water..." -> "when the hot water...")
+  // unless it starts with an acronym like "AMOLED" or "GPS" or "USB-C"
+  if (/^[A-ZÀ-Ý][a-zà-ÿ]+\s/.test(trimmed)) {
+    return trimmed.charAt(0).toLowerCase() + trimmed.slice(1);
+  }
+  return trimmed;
+}
+
 function hydrateUniversalTokens(
   raw: string,
   product: CatalogProduct,
   language: ReviewLanguage,
   tokens: BusinessLanguageTokens,
   forceLiteralProduct = false,
-  serviceMode = false
+  serviceMode = false,
+  offeringCtx?: OfferingVoiceContext | null
 ): string {
   const fallbackTokens =
     (serviceMode ? SERVICE_TOKENS[language] : undefined) ||
     UNIVERSAL_COMPOSER_TOKENS[language] ||
     UNIVERSAL_COMPOSER_TOKENS.en;
-  const useLiteralName = forceLiteralProduct || Math.random() < 0.62;
-  const productRef = useLiteralName
-    ? cleanProductLabel(product.item_name, false)
-    : getFallbackProductReference(product.category, language, false, serviceMode);
+
+  // Never mechanically insert untranslated foreign service labels into non-matching languages!
+  let productRef: string;
+  if (serviceMode) {
+    if (offeringCtx?.localizedName?.trim()) {
+      productRef = offeringCtx.localizedName.trim();
+    } else if (language !== 'en') {
+      productRef = getLocalizedOfferingPhrase(product, language, offeringCtx);
+    } else {
+      productRef =
+        Math.random() < 0.55
+          ? getLocalizedOfferingPhrase(product, language, offeringCtx)
+          : getFallbackProductReference(product.category, language, false, true);
+    }
+  } else {
+    const useLiteralName = forceLiteralProduct || Math.random() < 0.62;
+    productRef = useLiteralName
+      ? offeringCtx?.localizedName?.trim() || cleanProductLabel(product.item_name, false)
+      : getFallbackProductReference(product.category, language, false, false);
+  }
 
   const pickSafe = (arr: string[] | undefined, fallback: string[]) =>
-    arr && arr.length > 0 ? pickRandom(arr) : pickRandom(fallback);
+    sanitizeMidSentenceToken(arr && arr.length > 0 ? pickRandom(arr) : pickRandom(fallback));
 
   return raw
     .replace(/\{product\}/g, productRef)
@@ -279,6 +309,20 @@ function hydrateUniversalTokens(
     .replace(/\{timeframe\}/g, () => pickSafe(tokens.timeframe, fallbackTokens.timeframe))
     .replace(/\{device\}/g, () => pickSafe(tokens.contextA, fallbackTokens.contextA))
     .replace(/\{match\}/g, () => pickSafe(tokens.contextB, fallbackTokens.contextB));
+}
+
+function findOfferingVoiceContext(
+  adaptedPack: BusinessVoicePack | null | undefined,
+  itemSlug: string,
+  language: ReviewLanguage
+): OfferingVoiceContext | null {
+  if (!adaptedPack || !Array.isArray(adaptedPack.offeringContexts)) return null;
+  const slugLower = itemSlug.trim().toLowerCase();
+  return (
+    adaptedPack.offeringContexts.find(
+      (o) => o.language === language && o.item_slug?.trim().toLowerCase() === slugLower
+    ) ?? null
+  );
 }
 
 function findAdaptedLanguagePack(
@@ -358,6 +402,9 @@ function composeCandidateCopy(
   globalUsedSentences?: Set<string>
 ): { subject: string; body: string; voice: ReviewerVoice } {
   const adaptedLangPack = findAdaptedLanguagePack(adaptedPack, language);
+  const offeringCtx = !iptvMode
+    ? findOfferingVoiceContext(adaptedPack, product.item_slug, language)
+    : null;
   const catContext = !iptvMode
     ? findCategoryVoiceContext(adaptedPack, product.category, language)
     : null;
@@ -384,7 +431,7 @@ function composeCandidateCopy(
   const hydrate = (text: string) =>
     useIPTVBank
       ? hydrateIPTVTokens(text, product, language, forceLiteralProduct)
-      : hydrateUniversalTokens(text, product, language, effectiveTokens, forceLiteralProduct, serviceMode);
+      : hydrateUniversalTokens(text, product, language, effectiveTokens, forceLiteralProduct, serviceMode, offeringCtx);
 
   // 25% chance to pull from user-created custom templates if matching category/language/stars exist
   const matchingCustom = customTemplates.filter(
@@ -462,18 +509,18 @@ function composeCandidateCopy(
     }
   }
 
-  // ~16% chance of an ultra-short, punchy mobile-typed human review (when not forcing extra tail)
+  // ~16% chance of an ultra-short, punchy human review (when not forcing extra tail)
   if (!forceExtraTail && !iptvMode && Math.random() < 0.16) {
-    const ultraShort = buildUltraShortReview(product, language, stars, serviceMode);
+    const ultraShort = buildUltraShortReview(product, language, stars, serviceMode, offeringCtx);
     if (ultraShort) {
       const humanized = applyHumanImperfections(ultraShort.subject, ultraShort.body, language);
       return { subject: humanized.subject, body: humanized.body, voice: 'minimalist' };
     }
   }
 
-  // ~45% chance for service businesses: rich, non-generic 5-part story (problem, action, appointment, resolution, observation/company)
-  if (serviceMode && !iptvMode && stars >= 3 && Math.random() < 0.45) {
-    const story = buildDetailedServiceStory(product, language, stars, companyName, globalUsedSentences);
+  // ~55% chance for service businesses (or any business with AI offeringContexts): offering-accurate story
+  if ((serviceMode || offeringCtx) && !iptvMode && stars >= 4 && Math.random() < 0.58) {
+    const story = buildDetailedServiceStory(product, language, stars, companyName, globalUsedSentences, offeringCtx);
     if (story) {
       return { subject: story.subject, body: story.body, voice: 'technical' };
     }
@@ -484,15 +531,17 @@ function composeCandidateCopy(
   const mergedSubjects = extraSubs.length > 0 ? [...subjects, ...extraSubs] : subjects;
   const rawSubject = hydrate(pickLeastUsed(mergedSubjects, globalSubjectCounts));
 
-  // Vary structure naturally: 1-sentence short note (~26%), 2-sentence casual (~48%), 3-sentence detailed (~26%)
+  // Vary structure naturally: 1-sentence short note (~24%), 2-sentence casual (~50%), 3-sentence detailed (~26%)
   const structureRoll = Math.random();
   const sentences: string[] = [];
-  const chosenOpener = pickLeastUsed(openers, globalOpenerCounts);
+  const chosenOpener = offeringCtx?.scenarios?.length && stars >= 4 && Math.random() < 0.65
+    ? pickLeastUsed(offeringCtx.scenarios, globalOpenerCounts)
+    : pickLeastUsed(openers, globalOpenerCounts);
 
-  // For service businesses, inject a concrete service-matched detail (boiler/leak/emergency/install) ~55% of the time
+  // For service businesses, inject a concrete offering-matched detail
   const serviceDetail =
-    serviceMode && !iptvMode && Math.random() < 0.55
-      ? getServiceSpecificSentence(product, language, stars)
+    (serviceMode || offeringCtx) && !iptvMode && Math.random() < 0.65
+      ? getServiceSpecificSentence(product, language, stars, offeringCtx)
       : null;
 
   if (structureRoll < 0.26 && !forceExtraTail) {
@@ -619,12 +668,16 @@ function composeUniqueReviewCopy(
     UNIVERSAL_COMPOSER_TOKENS[language] ||
     UNIVERSAL_COMPOSER_TOKENS.en;
 
+  const offeringCtx = !iptvMode
+    ? findOfferingVoiceContext(adaptedPack, product.item_slug, language)
+    : null;
+
   for (let extra = 0; extra < 20; extra++) {
     const rawTail = pickRandom(tails);
     const extraSentence =
       useIPTVTails
         ? hydrateIPTVTokens(rawTail, product, language, true)
-        : hydrateUniversalTokens(rawTail, product, language, universalTokens, true, serviceMode);
+        : hydrateUniversalTokens(rawTail, product, language, universalTokens, true, serviceMode, offeringCtx);
     const merged = `${fallback.body} ${extraSentence}`.trim();
     const norm = normalizeReviewBody(merged);
     if (!globalUsedBodies.has(norm)) {
@@ -633,10 +686,8 @@ function composeUniqueReviewCopy(
     }
   }
 
-  const productTag = cleanProductLabel(product.item_name, iptvMode);
-  const finalBody = `${fallback.body} (${productTag})`.trim();
-  globalUsedBodies.add(normalizeReviewBody(finalBody));
-  return { ...fallback, body: finalBody };
+  globalUsedBodies.add(normalizeReviewBody(fallback.body));
+  return fallback;
 }
 
 const ARABIC_DISPLAY_NAMES = {
@@ -700,18 +751,55 @@ const REAL_SURNAMES_BY_LANGUAGE: Record<ReviewLanguage, string[]> = {
   ...GLOBAL_EXTRA_SURNAMES,
 };
 
+const COUNTRY_EMAIL_DOMAINS: Record<string, string[]> = {
+  BE: ['gmail.com', 'outlook.com', 'telenet.be', 'skynet.be', 'proximus.be', 'outlook.be', 'hotmail.com', 'icloud.com'],
+  NL: ['gmail.com', 'outlook.com', 'ziggo.nl', 'kpnmail.nl', 'hotmail.nl', 'icloud.com'],
+  FR: ['gmail.com', 'outlook.fr', 'orange.fr', 'wanadoo.fr', 'free.fr', 'yahoo.fr', 'icloud.com'],
+  DE: ['gmail.com', 'gmx.de', 'web.de', 't-online.de', 'outlook.de', 'icloud.com'],
+  CH: ['gmail.com', 'bluewin.ch', 'outlook.com', 'sunrise.ch', 'icloud.com', 'proton.me'],
+  GB: ['gmail.com', 'outlook.com', 'btinternet.com', 'hotmail.co.uk', 'icloud.com'],
+  MA: ['gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.fr', 'icloud.com'],
+  ES: ['gmail.com', 'outlook.es', 'hotmail.com', 'yahoo.es', 'icloud.com'],
+  IT: ['gmail.com', 'libero.it', 'alice.it', 'outlook.it', 'icloud.com'],
+  CA: ['gmail.com', 'outlook.com', 'rogers.com', 'bell.net', 'icloud.com'],
+};
+
+const UNIVERSAL_EMAIL_DOMAINS = ['gmail.com', 'outlook.com', 'hotmail.com', 'icloud.com', 'proton.me', 'yahoo.com'];
+
+const BELGIAN_SURNAMES_NL = [
+  'Peeters', 'Janssens', 'Maes', 'Jacobs', 'Mertens', 'Willems', 'Claes', 'Goossens',
+  'Wouters', 'De Smet', 'Vermeulen', 'Pauwels', 'Aerts', 'Hermans', 'Michiels', 'Vandenberghe',
+];
+
+function resolveDomainsForLocale(language: ReviewLanguage, countryCode?: string): string[] {
+  const cc = (countryCode || '').trim().toUpperCase();
+  if (cc && COUNTRY_EMAIL_DOMAINS[cc]) {
+    return COUNTRY_EMAIL_DOMAINS[cc];
+  }
+  const pool = NAMES_BY_LANGUAGE[language] || NAMES_BY_LANGUAGE.en;
+  // When country is unknown, filter out country-locked ISPs (.nl/.uk/.fr ISPs) to avoid regional mismatches!
+  const neutral = pool.domains.filter((d) => /\.(com|me|net|org)$/i.test(d));
+  return neutral.length >= 3 ? neutral : UNIVERSAL_EMAIL_DOMAINS;
+}
+
 function createUniqueIdentity(
   existing: Set<string>,
-  language: ReviewLanguage
+  language: ReviewLanguage,
+  countryCode?: string
 ): { email: string; name: string } {
   const pool = NAMES_BY_LANGUAGE[language] || NAMES_BY_LANGUAGE.en;
-  const surnames = REAL_SURNAMES_BY_LANGUAGE[language] || REAL_SURNAMES_BY_LANGUAGE.en;
+  const cc = (countryCode || '').trim().toUpperCase();
+  const surnames =
+    cc === 'BE' && language === 'nl'
+      ? BELGIAN_SURNAMES_NL
+      : REAL_SURNAMES_BY_LANGUAGE[language] || REAL_SURNAMES_BY_LANGUAGE.en;
+  const domains = resolveDomainsForLocale(language, cc);
 
-  for (let attempt = 0; attempt < 25; attempt++) {
+  for (let attempt = 0; attempt < 30; attempt++) {
     const first = pickRandom(pool.first);
     const displayLast = pickRandom(surnames);
     const emailLast = displayLast.toLowerCase().replace(/\s+/g, '');
-    const domain = pickRandom(pool.domains);
+    const domain = pickRandom(domains);
     const pattern = Math.random();
 
     let local: string;
@@ -726,11 +814,14 @@ function createUniqueIdentity(
     }
 
     const email = `${local}@${domain}`;
-    if (!existing.has(email)) {
+    const formattedName = formatReviewerName(first, displayLast, language);
+    const nameKey = `name::${formattedName.toLowerCase()}`;
+    if (!existing.has(email) && !existing.has(nameKey)) {
       existing.add(email);
+      existing.add(nameKey);
       return {
         email,
-        name: formatReviewerName(first, displayLast, language),
+        name: formattedName,
       };
     }
   }
@@ -809,7 +900,7 @@ export function generateSingleReviewForProduct(
   const identity =
     forcedEmail && forcedName
       ? { email: forcedEmail, name: forcedName }
-      : createUniqueIdentity(existingEmails, language);
+      : createUniqueIdentity(existingEmails, language, adaptedPack?.detectedCountryCode);
 
   const dateMs = generateRandomDateMs(startMs, endMs);
 
@@ -834,6 +925,8 @@ export function generateSingleReviewForProduct(
     voice,
     language,
     isReturningCustomer,
+    sourceOrigin: 'generated_preview',
+    sourceVerified: false,
   };
 }
 
@@ -916,9 +1009,10 @@ export function generateReviewDataset(
   );
 
   const returningPool: ReturningCustomerProfile[] = [];
+  const detectedCountryCode = adaptedPack?.detectedCountryCode;
   for (let i = 0; i < returningPoolSize; i++) {
     const lang = pickLanguage(config.selectedLanguages);
-    const identity = createUniqueIdentity(allEmails, lang);
+    const identity = createUniqueIdentity(allEmails, lang, detectedCountryCode);
     returningPool.push({
       name: identity.name,
       email: identity.email,
@@ -984,7 +1078,7 @@ export function generateReviewDataset(
 
       const language = chosenLang ?? pickLanguage(config.selectedLanguages);
       if (!chosenEmail || !chosenName) {
-        const identity = createUniqueIdentity(allEmails, language);
+        const identity = createUniqueIdentity(allEmails, language, detectedCountryCode);
         chosenEmail = identity.email;
         chosenName = identity.name;
       }
@@ -1029,6 +1123,8 @@ export function generateReviewDataset(
         voice,
         language,
         isReturningCustomer: false,
+        sourceOrigin: 'generated_preview',
+        sourceVerified: false,
       });
     }
 

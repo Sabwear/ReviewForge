@@ -90,6 +90,7 @@ export interface BusinessProfile {
   areasServed: string[];
   socialLinks: { label: string; url: string }[];
   siteLanguage: string;
+  detectedCountryCode?: string;
   publishedRating: { value: number; count: number | null; best: number } | null;
 }
 
@@ -103,6 +104,7 @@ export interface WebsiteScanResponse {
   detectedStoreBaseUrl: string;
   detectedBusinessName?: string;
   detectedBusinessSummary?: string;
+  detectedCountryCode?: string;
   products: CatalogProduct[];
   pack: BusinessVoicePack | null;
 }
@@ -187,6 +189,20 @@ export const LANGUAGE_OPTIONS: LanguageOption[] = [
   { code: 'ms', flag: '🇲🇾', countryCode: 'my', label: 'Malay', nativeLabel: 'Bahasa Melayu', dir: 'ltr', region: 'Asia' },
 ];
 
+export type ReviewSourceOrigin =
+  | 'imported_verified'
+  | 'imported_unverified'
+  | 'ai_remediated'
+  | 'generated_preview';
+
+export interface ReviewModificationRecord {
+  timestamp: string;
+  field: 'item_name' | 'category' | 'subject' | 'body' | 'reviewer_email' | 'status';
+  before: string;
+  after: string;
+  reason: string;
+}
+
 export interface GeneratedReview {
   id: string;
   item_id: string;
@@ -205,6 +221,25 @@ export interface GeneratedReview {
   voice: ReviewerVoice;
   language: ReviewLanguage;
   isReturningCustomer: boolean;
+  sourceOrigin?: ReviewSourceOrigin;
+  sourceVerified?: boolean;
+  needsManualVerification?: boolean;
+  manualVerificationNote?: string;
+  rejectionReason?: string;
+  originalRowNumber?: number;
+  originalSnapshot?: {
+    item_id: string;
+    item_slug: string;
+    item_name: string;
+    category: string;
+    reviewer_name: string;
+    reviewer_email: string;
+    stars: number;
+    subject: string;
+    body: string;
+    review_date: string;
+  };
+  modificationLog?: ReviewModificationRecord[];
 }
 
 export interface ReviewTemplate {
@@ -255,11 +290,23 @@ export interface CategoryVoiceContext {
   middles: string[];
 }
 
+export interface OfferingVoiceContext {
+  item_slug: string;
+  language: ReviewLanguage;
+  localizedName: string;
+  distinctiveKeywords?: string[];
+  scenarios: string[];
+  actions: string[];
+  outcomes: string[];
+}
+
 export interface BusinessVoicePack {
   detectedBusinessName: string;
   businessSummary: string;
+  detectedCountryCode?: string;
   productClassifications?: ProductClassification[];
   categoryContext?: CategoryVoiceContext[];
+  offeringContexts?: OfferingVoiceContext[];
   languagePacks: BusinessLanguagePack[];
 }
 

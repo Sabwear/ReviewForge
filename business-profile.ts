@@ -95,6 +95,75 @@ function metaContent(html: string, key: string): string {
   return clean(tag?.match(/content=(?:"([^"]*)"|'([^']*)')/i)?.slice(1).find(Boolean), 320);
 }
 
+const COUNTRY_TLD_MAP: Record<string, string> = {
+  be: 'BE', nl: 'NL', fr: 'FR', de: 'DE', ch: 'CH', at: 'AT', lu: 'LU',
+  uk: 'GB', ie: 'IE', es: 'ES', it: 'IT', pt: 'PT', ma: 'MA', dz: 'DZ',
+  tn: 'TN', ae: 'AE', sa: 'SA', qa: 'QA', tr: 'TR', pl: 'PL', se: 'SE',
+  no: 'NO', dk: 'DK', ro: 'RO', cz: 'CZ', ca: 'CA', au: 'AU', nz: 'NZ',
+};
+
+const PHONE_PREFIX_COUNTRY: Array<[RegExp, string]> = [
+  [/^\+|00/, ''],
+  [/^(\+|00)32\b/, 'BE'],
+  [/^(\+|00)31\b/, 'NL'],
+  [/^(\+|00)33\b/, 'FR'],
+  [/^(\+|00)49\b/, 'DE'],
+  [/^(\+|00)41\b/, 'CH'],
+  [/^(\+|00)352\b/, 'LU'],
+  [/^(\+|00)44\b/, 'GB'],
+  [/^(\+|00)212\b/, 'MA'],
+  [/^(\+|00)34\b/, 'ES'],
+  [/^(\+|00)39\b/, 'IT'],
+  [/^(\+|00)351\b/, 'PT'],
+  [/^(\+|00)971\b/, 'AE'],
+  [/^(\+|00)966\b/, 'SA'],
+];
+
+const COUNTRY_NAME_HINTS: Array<[RegExp, string]> = [
+  [/\b(belgium|belgi[eë]|belgique|brussel|brussels|bruxelles|antwerpen|vlaanderen|wallonie)\b/i, 'BE'],
+  [/\b(netherlands|nederland|amsterdam|rotterdam|utrecht)\b/i, 'NL'],
+  [/\b(morocco|maroc|casablanca|rabat|marrakech|tanger)\b/i, 'MA'],
+  [/\b(switzerland|suisse|schweiz|zurich|geneva|genève)\b/i, 'CH'],
+  [/\b(france|paris|lyon|marseille|toulouse|bordeaux)\b/i, 'FR'],
+  [/\b(germany|deutschland|berlin|münchen|hamburg|köln)\b/i, 'DE'],
+  [/\b(united kingdom|england|scotland|london|manchester)\b/i, 'GB'],
+  [/\b(canada|toronto|montreal|montréal|vancouver)\b/i, 'CA'],
+];
+
+export function inferCountryCodeFromSignals(opts: {
+  hostname?: string;
+  siteLanguage?: string;
+  address?: string;
+  phones?: string[];
+  areas?: string[];
+  titleAndMeta?: string;
+}): string {
+  // 1. Explicit locale region tag like en-BE, nl-BE, fr-BE, fr-CA, de-CH
+  const langMatch = (opts.siteLanguage || '').match(/^[a-z]{2,3}-([A-Z]{2})\b/i);
+  if (langMatch) return langMatch[1].toUpperCase();
+
+  // 2. Phone international dialing prefix (+32, +31, +33, +212, etc.)
+  for (const ph of opts.phones || []) {
+    const compact = ph.replace(/[\s().-]/g, '');
+    for (const [rx, code] of PHONE_PREFIX_COUNTRY) {
+      if (code && rx.test(compact)) return code;
+    }
+  }
+
+  // 3. Country-code TLD (.be, .nl, .fr, .ma, .co.uk, etc.)
+  const host = (opts.hostname || '').toLowerCase().replace(/\.$/, '');
+  const parts = host.split('.');
+  const tld = parts[parts.length - 1] || '';
+  if (tld && COUNTRY_TLD_MAP[tld]) return COUNTRY_TLD_MAP[tld];
+
+  // 4. Address, areas served, or meta/title country mention
+  const text = `${opts.address || ''} ${(opts.areas || []).join(' ')} ${opts.titleAndMeta || ''}`;
+  for (const [rx, code] of COUNTRY_NAME_HINTS) {
+    if (rx.test(text)) return code;
+  }
+  return '';
+}
+
 export function buildBusinessProfile(
   pages: { url: string; html: string }[],
   extra: { name: string; summary?: string }
@@ -188,19 +257,42 @@ export function buildBusinessProfile(
     logoUrl = httpUrl(icon?.match(/href=["']([^"']+)["']/i)?.[1], home.url);
   }
 
+  let homeHost = '';
+  let homeTitle = '';
+  if (home) {
+    try {
+      homeHost = new URL(home.url).hostname;
+    } catch {
+      /* ignore */
+    }
+    homeTitle = clean(home.html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1], 180);
+  }
+
+  const phoneList = [...phones.values()].slice(0, 3);
+  const areaList = [...areas].slice(0, 8);
+  const detectedCountryCode = inferCountryCodeFromSignals({
+    hostname: homeHost,
+    siteLanguage,
+    address,
+    phones: phoneList,
+    areas: areaList,
+    titleAndMeta: `${homeTitle} ${description} ${extra.name} ${extra.summary || ''}`,
+  });
+
   return {
     name: extra.name,
     summary: clean(extra.summary, 400) || description,
     summarySource: clean(extra.summary) ? 'ai' : 'website',
     logoUrl,
-    phones: [...phones.values()].slice(0, 3),
+    phones: phoneList,
     emails: [...emails].slice(0, 3),
     address,
     openingHours: [...hours].slice(0, 7),
     priceRange,
-    areasServed: [...areas].slice(0, 8),
+    areasServed: areaList,
     socialLinks: [...socials].map(([label, url]) => ({ label, url })),
     siteLanguage,
+    detectedCountryCode: detectedCountryCode || undefined,
     publishedRating,
   };
 }

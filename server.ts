@@ -19,6 +19,7 @@ import {
   type AIUsageMetrics,
   type ReviewAuditInput,
   type ServerAIEnv,
+  type ValidOfferingOption,
 } from './ai-core.ts';
 import {
   tryWooCommerce,
@@ -27,6 +28,8 @@ import {
   itemsFromLinksAndHeadings,
   mergeItems,
   businessNameFrom,
+  inferAccurateCategory,
+  isValidOfferingName,
   type ScrapedItem,
 } from './scraper.ts';
 import { buildBusinessProfile } from './business-profile.ts';
@@ -748,6 +751,7 @@ app.post('/api/ai/detect-reviews', async (req, res) => {
     const body = req.body as {
       reviews?: ReviewAuditInput[];
       businessContext?: string;
+      validOfferings?: ValidOfferingOption[];
       aiConfig?: AIConfigPayload;
     };
     const reviews = Array.isArray(body?.reviews) ? body.reviews : [];
@@ -766,7 +770,8 @@ app.post('/api/ai/detect-reviews', async (req, res) => {
       body?.aiConfig,
       env,
       reviews,
-      typeof body?.businessContext === 'string' ? body.businessContext.slice(0, 400) : ''
+      typeof body?.businessContext === 'string' ? body.businessContext.slice(0, 500) : '',
+      Array.isArray(body?.validOfferings) ? body.validOfferings.slice(0, 40) : undefined
     );
     res.json({ results, aiUsage: usage });
   } catch (err: unknown) {
@@ -779,6 +784,9 @@ app.post('/api/ai/rewrite-reviews', async (req, res) => {
     const body = req.body as {
       reviews?: ReviewAuditInput[];
       businessContext?: string;
+      validOfferings?: ValidOfferingOption[];
+      avoidOpenings?: string[];
+      detectedCountryCode?: string;
       aiConfig?: AIConfigPayload;
     };
     const reviews = Array.isArray(body?.reviews) ? body.reviews : [];
@@ -797,7 +805,12 @@ app.post('/api/ai/rewrite-reviews', async (req, res) => {
       body?.aiConfig,
       env,
       reviews,
-      typeof body?.businessContext === 'string' ? body.businessContext.slice(0, 400) : ''
+      typeof body?.businessContext === 'string' ? body.businessContext.slice(0, 500) : '',
+      {
+        validOfferings: Array.isArray(body?.validOfferings) ? body.validOfferings.slice(0, 40) : undefined,
+        avoidOpenings: Array.isArray(body?.avoidOpenings) ? body.avoidOpenings.slice(0, 30) : undefined,
+        detectedCountryCode: typeof body?.detectedCountryCode === 'string' ? body.detectedCountryCode.slice(0, 6) : undefined,
+      }
     );
     res.json({ rewrites, aiUsage: usage });
   } catch (err: unknown) {
@@ -874,14 +887,17 @@ ${sampleList || '(None provided — use business description)'}
 Target languages to generate packs for: ${languages.join(', ')}
 
 CRITICAL INSTRUCTIONS:
-1. Product Classification: For every product slug listed above, output a clean, properly formatted product name and group items into 2–6 clean, accurate categories (reuse the exact same category names across similar items!).
-2. Category-Specific Context: For EACH category you created and EACH target language (${languages.join(', ')}), generate a categoryContext entry with realistic, category-specific usage scenarios (contextA), category-specific product/service features (contextB), and category-specific openers & middles. Never mix categories.
-3. Store-Level Language Packs: For EACH target language (${languages.join(', ')}), generate a full languagePack covering stars 5, 4, 3, 2, and 1. If a region/country is detected, naturally weave subtle local authenticity into some sentences.
-4. Grammar & Composability: Every sentence in openers, middles, closers, and extraTails MUST be a complete, grammatically self-contained sentence so any opener + middle + closer combines fluently. Every value in tokens.timeframe must work smoothly after "in" (EN), "en" (FR/ES), "f" (Darija), or "خلال" (AR) (e.g. "24h", "48h", "2 days", "youmayn", "يومين").
-5. Authentic Darija (Latin / Arabizi): For "darija_latin", write genuine Moroccan/Maghreb Darija in pure Latin script (NO Arabic script characters!) with natural numerals (3, 7, 9) and everyday phrasing.
-6. Authentic Arabic ("ar"): Write fluent, natural Modern Arabic as real customers write.
-7. STRICT LOW-STAR SAFETY GUARDRAIL (1-star & 2-star): NEVER allege scams, fraud, fakes, counterfeits, or undelivered orders. Low-star reviews must ONLY describe benign, realistic buyer friction (e.g., personal preference, fit/size mismatch, ordering wrong variant/color, outer shipping box dent, scheduling wait, or learning curve).
-8. Placeholders: Use ONLY {product}, {contextA}, {contextB}, {duration}, {timeframe}. Do NOT invent other placeholders.`;
+1. Product/Service Classification: For every offering slug listed above, output a clean, properly formatted offering name (never a website heading or slogan) and group items into specific, accurate sub-categories (clearly distinguish Maintenance vs. Repair vs. Installation vs. Leak/Plumbing vs. Renewables/Heat Pumps, or distinct product lines — never collapse distinct sub-services into one vague bucket!).
+2. Per-Offering Contexts ("offeringContexts"): For EACH offering slug (up to 15 core slugs) and EACH target language (${languages.join(', ')}), generate an offeringContext entry with:
+   - "localizedName": natural lowercase/cased noun phrase in THAT exact language (NEVER leave English service labels untranslated in FR/NL/DE/ES/AR!).
+   - "distinctiveKeywords": 3–5 domain terms specific to THIS exact offering.
+   - "scenarios", "actions", "outcomes": 3–4 distinct, natural, complete sentences strictly matching ONLY this exact offering (NO mechanical "{product}" pasting, NO cross-service mixing!).
+3. Category-Specific Context: For EACH category and EACH target language (${languages.join(', ')}), generate a categoryContext entry where contextA and contextB are LOWERCASE noun phrases (never capitalized full sentences ending in periods!) so they embed cleanly inside sentences.
+4. Store-Level Language Packs: For EACH target language (${languages.join(', ')}), generate a full languagePack covering stars 5, 4, 3, 2, and 1. Detect regional country code ("detectedCountryCode", e.g. BE, FR, NL, DE, GB, MA, CH) if evident from URL/filename/notes and use authentic regional phrasing. ZERO marketing clichés ("exceeded expectations", "worth every penny", "game-changer", "top-tier") and ZERO artificial spelling mistakes!
+5. Grammar & Composability: Every sentence in openers, middles, closers, and extraTails MUST be a complete, grammatically self-contained sentence. Every value in tokens.timeframe must work smoothly after "in" (EN), "en" (FR/ES), "binnen" (NL), "f" (Darija), or "خلال" (AR) (e.g. "24h", "48h", "2 days").
+6. Authentic Darija ("darija_latin"): Pure Latin script with natural numerals (3, 7, 9). Authentic Arabic ("ar"): Fluent Modern Arabic.
+7. STRICT RATING & LOW-STAR HONESTY: 3-star titles/sentences must be neutral/mixed (never 5-star praise!). 1–2 star reviews must describe benign, realistic friction (scheduling wait, preference mismatch) — NEVER scam/fraud claims.
+8. Placeholders: Use ONLY {product}, {contextA}, {contextB}, {duration}, {timeframe}.`;
 
     const { data, usage } = await generateJsonWithAI(body?.aiConfig, env, {
       systemInstruction:
@@ -972,19 +988,19 @@ app.post('/api/scan-website', async (req, res) => {
       }
     }
 
-    // Keyless extraction (WooCommerce API, JSON-LD, sitemap, links, headings)
+    // Keyless extraction (WooCommerce API, JSON-LD, sitemap, leaf offering links)
     const [wooItems, sitemapItems] =
       shopifyProducts.length > 0
         ? [[], []]
         : await Promise.all([
             tryWooCommerce(finalOrigin, safeFetchPublicUrl),
-            extractSitemapItems(finalOrigin, safeFetchPublicUrl),
+            extractSitemapItems(finalOrigin, safeFetchPublicUrl, homeResult.finalUrl),
           ]);
     const heuristicItems = mergeItems([
       wooItems,
       jsonLdItems,
       sitemapItems,
-      itemsFromLinksAndHeadings(scannedPages),
+      itemsFromLinksAndHeadings(scannedPages, homeResult.finalUrl),
     ]);
 
     // Check how much real content we extracted; if site blocked fetch (Cloudflare/403) or is an empty SPA, run Search Grounding fallback
@@ -1053,22 +1069,24 @@ ${searchFallbackSummary ? `WEB SEARCH SUMMARY FOR THIS WEBSITE:\n${searchFallbac
 Target languages to generate review packs for: ${languages.join(', ')}
 
 CRITICAL INSTRUCTIONS:
-1. Business Type & Offerings:
-   - Determine whether this website is a "service" business (plumber, HVAC/boiler technician, agency, clinic, salon, restaurant, hotel, consultancy, SaaS, home services, repair shop, coaching, etc.) or an "ecommerce" store.
+1. Business Type & Strict Real Offerings Only:
+   - Determine whether this website is a "service" business or an "ecommerce" store, and infer "detectedCountryCode" (ISO-2 like BE, NL, FR, DE, GB, MA, CH, US) from the domain, phone, address, or language tags.
    - ${
      shopifyProducts.length > 0
-       ? 'Use the exact Shopify products listed above (keeping their exact item_slug and product_url) and group them into 2–6 clean categories.'
-       : 'Extract 6 to 15 concrete, REAL services, packages, plans, treatments, or products actually offered by this website. NEVER include city/location names (e.g. Brussel, Gent), generic navigation pages ("Our services", "Service areas", "About us"), or marketing slogans as items! Give each a clean item_name, lowercase item_slug, logical category (2–4 categories total), and the best matching product_url on that domain.'
+       ? 'Use the exact Shopify products listed above (keeping their exact item_slug and product_url) and group them into specific, accurate categories.'
+       : 'Extract 6 to 14 concrete, REAL services, packages, plans, treatments, or products actually offered by this website. STRICTLY FORBIDDEN as items: website headings, process steps ("Tell us what you need", "We discuss the next step", "How it works"), slogans ("Care that suits your home", "Relax..."), navigation hubs ("Our services", "Solutions", "Service areas", "About us", "Customer feedback"), buttons/CTAs ("Book a technician", "Request a quote"), or city/location pages! Assign specific, distinct categories (clearly separate Maintenance, Repair, Installation, Plumbing/Leaks, Emergency, and Heat Pumps/Equipment — never lump distinct interventions together!).'
    }
-2. Service vs Product Voice:
-   - If this is a SERVICE business, reviews MUST sound like real clients describing (a) what problem they experienced, (b) what the technician/specialist actually did (STRICTLY matching ONLY what this specific business offers — NEVER invent out-of-context trades or unrelated repairs!), (c) how the appointment went, (d) whether the problem was resolved, (e) 1–2 personal observations, and mention the SPECIFIC company name in several sentences so they cannot apply to any generic company — STRICTLY FORBIDDEN words: "bought", "ordered", "packaging", "shipping", "box", "colis", "emballage", "cet article", "dit artikel", "cadeau", "listing photos", or "swap variant"!
-   - If this is an E-COMMERCE store, reviews should match the actual products (features, build quality, delivery, unboxing, daily use).
-3. Category-Specific Context: For EACH category you created and EACH target language (${languages.join(', ')}), generate a categoryContext entry with realistic, category-specific scenarios (contextA), concrete service/product qualities (contextB), and category-specific openers & middles.
-4. Store/Business-Level Language Packs: For EACH target language (${languages.join(', ')}), generate a full languagePack covering stars 5, 4, 3, 2, and 1. Every sentence in openers, middles, closers, and extraTails MUST be grammatically self-contained. Every value in tokens.timeframe must work smoothly after "in" (EN), "en" (FR/ES), "f" (Darija), or "خلال" (AR).
-5. Authentic Darija (Latin / Arabizi): For "darija_latin", write genuine Moroccan/Maghreb Darija in pure Latin script (NO Arabic script characters!) with natural numerals (3, 7, 9).
-6. Authentic Arabic ("ar"): Write fluent, natural Modern Arabic suitable for real clients/customers.
-7. STRICT LOW-STAR SAFETY GUARDRAIL (1-star & 2-star): NEVER accuse the business of being a scam, fraud, fake, dishonest, or taking money without delivering. Low-star reviews must ONLY describe benign, realistic friction (e.g., minor scheduling wait, slight preference mismatch, needed one extra revision, wishing for more availability/options, or minor learning curve).
-8. Placeholders: Use ONLY {product}, {contextA}, {contextB}, {duration}, {timeframe}. Do NOT invent other placeholders.`;
+2. Per-Offering Contexts ("offeringContexts") — ZERO Cross-Service Mixing & ZERO Mixed-Language Labels:
+   - For EACH discovered offering slug and EACH target language (${languages.join(', ')}), generate an "offeringContexts" entry containing:
+     * "localizedName": natural noun phrase in THAT exact language (e.g. for "heat-pumps": en="a heat pump", fr="une pompe à chaleur", nl="een warmtepomp" — NEVER paste English labels into FR/NL/DE/ES/AR!).
+     * "distinctiveKeywords": 3–5 specific domain words unique to THIS exact offering.
+     * "scenarios", "actions", "outcomes": 3–4 distinct, natural, complete sentences strictly describing ONLY this exact offering (e.g. a maintenance review MUST describe preventive inspection/cleaning/tune-up, NEVER an emergency breakdown; an installation review MUST describe fitting/replacing equipment, NEVER repairing an old valve; a leak review MUST describe pipe/joint leak repair, NEVER boiler burner codes!).
+3. Authentic Natural Voice (Zero Artificial Typos, Zero Marketing Fluff):
+   - Plain, grounded customer phrasing in the regional variety matching detectedCountryCode (e.g. Belgian French & Belgian Dutch if BE).
+   - Mention the company name sparingly (at most 1 in 8 sentences) and NEVER in promotional slogan titles.
+   - NEVER use e-commerce shipping/box/packaging words on a service business.
+   - NEVER introduce spelling errors or chat slang ("reccomend", "thx", "vrmt"), and NEVER use marketing clichés ("exceeded expectations", "worth every penny", "game-changer", "top-tier").
+4. Category & Language Packs: Ensure tokens.contextA and tokens.contextB are lowercase noun phrases (no trailing periods!) so placeholders compose cleanly. Keep 3-star content genuinely neutral/mixed and 1–2 star content honest scheduling/communication friction (no scam allegations). Use ONLY {product}, {contextA}, {contextB}, {duration}, {timeframe}.`;
 
     let parsed: ParsedScan | null = null;
     let aiUsage: AIUsageMetrics | null = null;
@@ -1112,6 +1130,13 @@ CRITICAL INSTRUCTIONS:
       (parsed?.productClassifications || []).map((c) => [c.item_slug.toLowerCase(), c])
     );
 
+    const filteredAiItems = (parsed?.discoveredItems || []).filter((it) =>
+      isValidOfferingName(String(it.item_name || ''), String(it.item_slug || ''))
+    );
+
+    const rawChosenItems = filteredAiItems.length > 0 ? filteredAiItems : heuristicItems;
+    const seenFinalSlugs = new Set<string>();
+
     const finalProducts =
       shopifyProducts.length > 0
         ? shopifyProducts.map((sp) => {
@@ -1124,16 +1149,26 @@ CRITICAL INSTRUCTIONS:
               product_url: sp.product_url,
             };
           })
-        : (parsed?.discoveredItems?.length ? parsed.discoveredItems : heuristicItems).slice(0, 30).map((item, idx) => {
-            const slug = slugifySafe(item.item_slug || item.item_name, idx + 1);
-            return {
-              item_id: String(idx + 1),
-              item_slug: slug,
-              item_name: String(item.item_name || slug).trim(),
-              category: String(item.category || 'Services').trim(),
-              product_url: sanitizeHttpUrl(item.product_url, finalOrigin, slug),
-            };
-          });
+        : rawChosenItems
+            .filter((item) => {
+              const slug = slugifySafe(item.item_slug || item.item_name, 1);
+              if (seenFinalSlugs.has(slug)) return false;
+              seenFinalSlugs.add(slug);
+              return true;
+            })
+            .slice(0, 24)
+            .map((item, idx) => {
+              const slug = slugifySafe(item.item_slug || item.item_name, idx + 1);
+              const cleanName = String(item.item_name || slug).trim();
+              const refinedCat = inferAccurateCategory(cleanName, slug, String(item.category || '').trim());
+              return {
+                item_id: String(idx + 1),
+                item_slug: slug,
+                item_name: cleanName,
+                category: refinedCat,
+                product_url: sanitizeHttpUrl(item.product_url, finalOrigin, slug),
+              };
+            });
 
     if (finalProducts.length === 0) {
       res.status(502).json({
@@ -1156,11 +1191,17 @@ CRITICAL INSTRUCTIONS:
         ? `${detectedName} (${isEcommerce ? 'E-commerce' : 'Service business'}) — ${metaDesc.slice(0, 220)}`
         : `${detectedName} — ${isEcommerce ? 'Online store' : 'Service business'} offering ${uniqueCats.join(', ')} (${sampleOfferings.join(', ')}).`);
 
+    const builtProfile = buildBusinessProfile(rawPages, {
+      name: detectedName,
+      summary: parsed?.businessSummary,
+    });
+    const resolvedCountry =
+      (parsed?.detectedCountryCode || '').trim().toUpperCase() ||
+      builtProfile.detectedCountryCode ||
+      undefined;
+
     res.json({
-      businessProfile: buildBusinessProfile(rawPages, {
-        name: detectedName,
-        summary: parsed?.businessSummary,
-      }),
+      businessProfile: { ...builtProfile, detectedCountryCode: resolvedCountry },
       scannedUrl: homeResult.finalUrl.toString(),
       hostname: homeResult.finalUrl.hostname,
       scannedPagesCount: Math.max(1, scannedPages.length),
@@ -1175,13 +1216,23 @@ CRITICAL INSTRUCTIONS:
       aiUsage,
       detectedBusinessName: detectedName,
       detectedBusinessSummary: detectedSummary,
+      detectedCountryCode: resolvedCountry,
       pack: parsed
         ? {
             detectedBusinessName: parsed.detectedBusinessName,
             businessSummary: parsed.businessSummary,
+            detectedCountryCode: resolvedCountry,
             productClassifications: parsed.productClassifications,
+            offeringContexts: parsed.offeringContexts,
             categoryContext: parsed.categoryContext,
             languagePacks: parsed.languagePacks,
+          }
+        : resolvedCountry
+        ? {
+            detectedBusinessName: detectedName,
+            businessSummary: detectedSummary,
+            detectedCountryCode: resolvedCountry,
+            languagePacks: [],
           }
         : null,
     });
@@ -1199,10 +1250,12 @@ CRITICAL INSTRUCTIONS:
 
 interface ParsedScan {
   businessType?: string;
+  detectedCountryCode?: string;
   discoveredItems?: Array<{ item_name: string; item_slug: string; category: string; product_url?: string }>;
   detectedBusinessName: string;
   businessSummary: string;
   productClassifications?: Array<{ item_slug: string; cleanName: string; category: string }>;
+  offeringContexts?: unknown[];
   categoryContext?: unknown[];
   languagePacks: unknown[];
 }
