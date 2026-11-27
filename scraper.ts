@@ -70,6 +70,42 @@ function categoryFromUrl(u: URL): string {
   return first && seg.length > 1 ? titleFromSlug(first) : '';
 }
 
+function inferAccurateCategory(name: string, slug: string, rawCategory: string): string {
+  const text = `${name} ${slug}`.toLowerCase();
+  if (/emergenc|urgent|spoed|dépannage|depannage|24\/7|notdienst/i.test(text)) {
+    return 'Emergency Repairs';
+  }
+  if (/boiler|heat pump|heating|chauffage|verwarming|ketel|hot water|water heater|radiator|thermostat|hvac/i.test(text)) {
+    return 'Heating & Boilers';
+  }
+  if (/leak|lek|fuite|plumb|plombier|loodgieter|pipe|drain|sink|toilet|tap|faucet/i.test(text)) {
+    return 'Plumbing & Leaks';
+  }
+  if (/install|setup|montage|plaatsing|pose/i.test(text)) {
+    return 'Installations';
+  }
+  if (/maintenance|entretien|onderhoud|inspection|checkup|service plan/i.test(text)) {
+    return 'Maintenance';
+  }
+  if (/electr|wiring|panel|breaker|outlet|lighting/i.test(text)) {
+    return 'Electrical';
+  }
+  if (/clean|nettoyage|schoonmaak|maid|carpet|window/i.test(text)) {
+    return 'Cleaning';
+  }
+  if (/dental|dentist|implant|whitening|orthodont|clinic|physio|therapy/i.test(text)) {
+    return 'Clinical Care';
+  }
+  if (/seo|web|design|marketing|branding|ads|social|audit|consult/i.test(text)) {
+    return 'Digital & Consulting';
+  }
+  const cleanRaw = rawCategory.trim();
+  if (cleanRaw && !/^(services?|solutions?|general|pages?|en|fr|nl|de)$/i.test(cleanRaw)) {
+    return cleanRaw;
+  }
+  return 'General Services';
+}
+
 // ---- WooCommerce ----
 export async function tryWooCommerce(origin: string, fetcher: Fetcher): Promise<ScrapedItem[]> {
   try {
@@ -284,7 +320,11 @@ export function mergeItems(groups: ScrapedItem[][], max = 24): ScrapedItem[] {
       if (seen.has(key) || seen.has(nameKey)) continue;
       seen.add(key);
       seen.add(nameKey);
-      out.push({ ...it, item_id: String(out.length + 1), category: it.category || 'Services' });
+      out.push({
+        ...it,
+        item_id: String(out.length + 1),
+        category: inferAccurateCategory(it.item_name, it.item_slug, it.category),
+      });
       if (out.length >= max) return out;
     }
   }

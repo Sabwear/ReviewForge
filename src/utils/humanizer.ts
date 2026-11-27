@@ -236,7 +236,7 @@ export function buildUltraShortReview(
  */
 export const EXTRA_DIVERSE_SUBJECTS: Partial<Record<ReviewLanguage, Record<1 | 2 | 3 | 4 | 5, string[]>>> = {
   en: {
-    5: ['Great experience', 'Really glad I called', 'Super professional', 'Zero hassle', 'Worth every penny', 'Clean work', 'Fast turnaround', 'Spot on', 'Friendly & skilled', 'Solved quickly'],
+    5: ['Great experience', 'Really glad I called', 'Super professional', 'Zero hassle', 'Fair price', 'Clean work', 'Fast turnaround', 'Spot on', 'Friendly & skilled', 'Solved quickly'],
     4: ['Happy with the result', 'Good experience overall', 'Reliable & polite', 'Mostly great', 'Would use again', 'Fair pricing'],
     3: ['It was alright', 'Fine once booked', 'Average wait time', 'Got the job done'],
     2: ['Rescheduled twice', 'Wait was a bit long', 'Communication could be better'],
@@ -623,15 +623,25 @@ function getServiceStoryBank(
   };
 }
 
+function pickUniqueSentence(arr: string[], usedSentences?: Set<string>): string {
+  if (!usedSentences || arr.length <= 1) return pick(arr);
+  const unused = arr.filter((s) => !usedSentences.has(s.toLowerCase()));
+  const chosen = unused.length > 0 ? pick(unused) : pick(arr);
+  usedSentences.add(chosen.toLowerCase());
+  return chosen;
+}
+
 /**
  * Builds a grounded, non-generic, multi-element service review story covering:
  * problem -> technician action -> appointment -> resolution -> personal observation / company mention.
+ * Uses globalUsedSentences to prevent repeating the same story sentences across rows.
  */
 export function buildDetailedServiceStory(
   product: CatalogProduct,
   language: ReviewLanguage,
   stars: 1 | 2 | 3 | 4 | 5,
-  companyName?: string
+  companyName?: string,
+  usedSentences?: Set<string>
 ): { subject: string; body: string } | null {
   if (stars <= 2) return null; // Negative reviews stay realistic scheduling/expectation stories
   if (!['en', 'fr', 'nl'].includes(language)) return null;
@@ -639,27 +649,29 @@ export function buildDetailedServiceStory(
   const bank = getServiceStoryBank(product, language);
   const company = cleanCompanyName(companyName);
 
-  const parts: string[] = [];
-  // Always ground with problem + what the technician actually did
-  parts.push(pick(bank.problem));
-  parts.push(pick(bank.action));
-
-  // Add appointment OR resolution (or both on ~40% of detailed reviews)
-  const roll = Math.random();
-  if (roll < 0.45) {
-    parts.push(pick(bank.appointment));
-    parts.push(pick(bank.resolution));
-  } else if (roll < 0.75) {
-    parts.push(pick(bank.resolution));
-  } else {
-    parts.push(pick(bank.appointment));
+  // If all problem sentences for this subtype were already used, let caller fall back to varied composer
+  if (usedSentences && bank.problem.every((p) => usedSentences.has(p.toLowerCase()))) {
+    return null;
   }
 
-  // Personal observation or specific company mention (~45% mention the specific company when available)
+  const parts: string[] = [];
+  parts.push(pickUniqueSentence(bank.problem, usedSentences));
+  parts.push(pickUniqueSentence(bank.action, usedSentences));
+
+  const roll = Math.random();
+  if (roll < 0.45) {
+    parts.push(pickUniqueSentence(bank.appointment, usedSentences));
+    parts.push(pickUniqueSentence(bank.resolution, usedSentences));
+  } else if (roll < 0.75) {
+    parts.push(pickUniqueSentence(bank.resolution, usedSentences));
+  } else {
+    parts.push(pickUniqueSentence(bank.appointment, usedSentences));
+  }
+
   if (company && Math.random() < 0.48) {
-    parts.push(pick(bank.companyMentions).replace(/\{company\}/g, company));
+    parts.push(pickUniqueSentence(bank.companyMentions, usedSentences).replace(/\{company\}/g, company));
   } else if (Math.random() < 0.65) {
-    parts.push(pick(bank.observation));
+    parts.push(pickUniqueSentence(bank.observation, usedSentences));
   }
 
   const subjectsByLang: Record<string, string[]> = {

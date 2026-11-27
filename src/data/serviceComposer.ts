@@ -103,7 +103,7 @@ export const SERVICE_SENTENCE_BANKS: Partial<Record<ReviewLanguage, Record<1 | 2
   en: {
     5: {
       star: 5,
-      subjects: ['Fast, clean and reliable', 'Fixed on the first visit', 'Great technician, fair price', 'Highly recommend their team', 'Stress-free experience'],
+      subjects: ['Fast, clean and reliable', 'Fixed on the first visit', 'Great technician, fair price', 'Highly recommend their team', 'Sorted quickly'],
       openers: [
         'Called them for {product} at {contextA} and they managed to fit us in within {timeframe}.',
         'Had {product} done recently and I was genuinely impressed by {contextB}.',
@@ -118,7 +118,7 @@ export const SERVICE_SENTENCE_BANKS: Partial<Record<ReviewLanguage, Record<1 | 2
       closers: [
         'Saved their number for any future work.',
         'Would happily recommend them to neighbors and friends.',
-        'Easy five stars for a genuinely professional service.',
+        'Glad I called them, very solid work.',
       ],
     },
     4: {
@@ -126,7 +126,7 @@ export const SERVICE_SENTENCE_BANKS: Partial<Record<ReviewLanguage, Record<1 | 2
       subjects: ['Solid, professional work', 'Very good service overall', 'Reliable team'],
       openers: [
         'Scheduled {product} for {contextA} and the work was completed properly within {timeframe}.',
-        'Very happy with {product}; {contextB} gave me real peace of mind.',
+        'Very happy with {product}; {contextB} made the whole visit easy.',
       ],
       middles: [
         'Arrival was slightly later than the initial window, but they called ahead and did a thorough job.',
@@ -190,7 +190,7 @@ export const SERVICE_SENTENCE_BANKS: Partial<Record<ReviewLanguage, Record<1 | 2
       middles: [
         'Le diagnostic a été expliqué clairement avant de commencer, sans frais cachés, et tout a été laissé propre.',
         'Cela fait maintenant {duration} depuis leur passage et tout fonctionne parfaitement.',
-        'Ce qui m’a le plus rassuré, c’est {contextB} et le vrai sens du service.',
+        'Ce qui m’a le plus rassuré, c’est {contextB} et des explications simples.',
       ],
       closers: [
         'Je garde précieusement leur contact pour l’avenir.',
@@ -255,7 +255,7 @@ export const SERVICE_SENTENCE_BANKS: Partial<Record<ReviewLanguage, Record<1 | 2
   nl: {
     5: {
       star: 5,
-      subjects: ['Snel en netjes opgelost', 'Echte vakman', 'Stipt en betrouwbaar', 'Absolute aanrader', 'Direct verholpen'],
+      subjects: ['Snel en netjes opgelost', 'Echte vakman', 'Stipt en betrouwbaar', 'Zeker aan te raden', 'Direct verholpen'],
       openers: [
         'Contact opgenomen voor {product} bij {contextA} en binnen {timeframe} stond de technieker al voor de deur.',
         'Heel goede ervaring met {product}; vooral {contextB} viel meteen positief op.',

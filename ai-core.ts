@@ -784,6 +784,7 @@ RULES:
   4) Whether the problem was resolved
   5) 1–2 personal observations grounded in that exact service
   6) Mention the SPECIFIC company name in ~40% of rewritten reviews so they clearly belong to this business and not any generic company!
+- Preserve plain, grounded customer language — NEVER introduce marketing expressions ("game-changer", "exceeded expectations", "worth every penny", "top-tier", "stress-free experience", "peace of mind", "second to none").
 - Still vary lengths naturally (some ultra-short 5–12 words, some 1–2 sentences, some detailed 3–4 sentences), use diverse titles, and include occasional natural human quirks (~20%: minor phone typos like "reccomend"/"tres"/"rdv", occasional lowercase or missing final period).
 - PRESERVE negative/mixed 1–3 star reviews honestly (minor scheduling wait, slight preference mismatch — never scam/fraud allegations).`;
 

@@ -42,7 +42,19 @@ import {
 
 const AUDIT_MAP_STORAGE_KEY = 'reviewforge-ai-audit-map-v1';
 const AUDIT_RUNS_STORAGE_KEY = 'reviewforge-ai-audit-runs-v1';
+const VERIFIED_IDS_STORAGE_KEY = 'reviewforge-verified-review-ids-v1';
 const SAVED_LANGUAGES_KEY = 'reviewforge-selected-languages-v1';
+
+function loadSavedVerifiedIds(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(VERIFIED_IDS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
 
 const VALID_LANGUAGE_CODES = new Set<string>(LANGUAGE_OPTIONS.map((l) => l.code));
 
@@ -169,6 +181,7 @@ export default function App() {
   const [reviews, setReviews] = useState<GeneratedReview[]>([]);
   const [reviewAuditMap, setReviewAuditMap] = useState<Record<string, ReviewAuditEntry>>(loadSavedAuditMap);
   const [auditRuns, setAuditRuns] = useState<AuditRunSummary[]>(loadSavedAuditRuns);
+  const [verifiedReviewIds, setVerifiedReviewIds] = useState<string[]>(loadSavedVerifiedIds);
   const [isAuditingReviews, setIsAuditingReviews] = useState(false);
   const [isRewritingReviews, setIsRewritingReviews] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
@@ -196,6 +209,14 @@ export default function App() {
       // ignore storage errors
     }
   }, [auditRuns]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(VERIFIED_IDS_STORAGE_KEY, JSON.stringify(verifiedReviewIds));
+    } catch {
+      // ignore storage errors
+    }
+  }, [verifiedReviewIds]);
 
   const { eligible, excluded } = useMemo(
     () => filterEligibleProducts(products, config),
@@ -801,14 +822,50 @@ export default function App() {
   const handleClearAuditData = useCallback(() => {
     setReviewAuditMap({});
     setAuditRuns([]);
+    setVerifiedReviewIds([]);
     setAuditError(null);
     try {
       window.localStorage.removeItem(AUDIT_MAP_STORAGE_KEY);
       window.localStorage.removeItem(AUDIT_RUNS_STORAGE_KEY);
+      window.localStorage.removeItem(VERIFIED_IDS_STORAGE_KEY);
     } catch {
       // ignore
     }
   }, []);
+
+  const handleToggleVerified = useCallback((reviewId: string) => {
+    setVerifiedReviewIds((prev) =>
+      prev.includes(reviewId) ? prev.filter((id) => id !== reviewId) : [...prev, reviewId]
+    );
+  }, []);
+
+  const handleApproveCleanReviews = useCallback((ids: string[]) => {
+    setVerifiedReviewIds((prev) => Array.from(new Set([...prev, ...ids])));
+  }, []);
+
+  const handleExportVerifiedOnly = useCallback(() => {
+    const idSet = new Set(verifiedReviewIds);
+    const verifiedReviews = reviews.filter((r) => idSet.has(r.id));
+    if (verifiedReviews.length === 0) return;
+    const formatMeta =
+      EXPORT_FORMAT_OPTIONS.find((f) => f.id === config.exportFormat) ??
+      EXPORT_FORMAT_OPTIONS[0];
+    const content = serializeReviewsByFormat(
+      verifiedReviews,
+      config.exportFormat,
+      config.storeBaseUrl,
+      activeBusinessLabel
+    );
+    const slug = activeBusinessLabel
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    downloadExportFile(
+      content,
+      `${slug || 'reviews'}_verified_publish_${verifiedReviews.length}_rows.${formatMeta.extension}`,
+      formatMeta.mimeType
+    );
+  }, [reviews, verifiedReviewIds, config.exportFormat, config.storeBaseUrl, activeBusinessLabel]);
 
   const handleDeleteFlaggedReviews = useCallback((ids: string[]) => {
     const idSet = new Set(ids);
@@ -972,6 +1029,10 @@ export default function App() {
               onDeleteFlaggedReviews={handleDeleteFlaggedReviews}
               onClearAuditData={handleClearAuditData}
               onExportHumanOnly={handleExportHumanOnly}
+              verifiedIds={verifiedReviewIds}
+              onToggleVerified={handleToggleVerified}
+              onApproveCleanReviews={handleApproveCleanReviews}
+              onExportVerifiedOnly={handleExportVerifiedOnly}
             />
           )}
 

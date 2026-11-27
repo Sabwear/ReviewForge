@@ -26,6 +26,7 @@ import {
 } from 'recharts';
 import { AIConnectionStatus } from '../hooks/useAISettings';
 import { GeneratedReview, LANGUAGE_OPTIONS } from '../types/reviews';
+import { runDatasetIntegrityAudit } from '../utils/datasetIntegrity';
 import { FlagBadge } from './FlagBadge';
 
 export interface ReviewAuditEntry {
@@ -92,6 +93,10 @@ interface AIDetectorViewProps {
   onDeleteFlaggedReviews: (ids: string[]) => void;
   onClearAuditData: () => void;
   onExportHumanOnly: () => void;
+  verifiedIds: string[];
+  onToggleVerified: (reviewId: string) => void;
+  onApproveCleanReviews: (ids: string[]) => void;
+  onExportVerifiedOnly: () => void;
 }
 
 type VerdictFilter = 'all' | 'ai_flagged' | 'generic' | 'human' | 'unchecked';
@@ -122,8 +127,14 @@ export function AIDetectorView({
   onDeleteFlaggedReviews,
   onClearAuditData,
   onExportHumanOnly,
+  verifiedIds,
+  onToggleVerified,
+  onApproveCleanReviews,
+  onExportVerifiedOnly,
 }: AIDetectorViewProps) {
   const [verdictFilter, setVerdictFilter] = useState<VerdictFilter>('all');
+  const verifiedSet = useMemo(() => new Set(verifiedIds), [verifiedIds]);
+  const integrity = useMemo(() => runDatasetIntegrityAudit(reviews), [reviews]);
 
   const langMap = useMemo(() => {
     const m: Record<string, (typeof LANGUAGE_OPTIONS)[number]> = {};
@@ -379,6 +390,17 @@ export function AIDetectorView({
             </button>
           )}
 
+          {verifiedIds.length > 0 && (
+            <button
+              type="button"
+              onClick={onExportVerifiedOnly}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl transition-colors cursor-pointer"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Export Verified ({verifiedIds.length})</span>
+            </button>
+          )}
+
           {hasSavedData && (
             <button
               type="button"
@@ -595,6 +617,80 @@ export function AIDetectorView({
             </div>
           </section>
 
+          {/* Instant Dataset Integrity Audit (Repeated sentences, Repeat reviewers & dates, Marketing phrases) */}
+          <section className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  Live Dataset Integrity & Publishing Gate
+                </h2>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Checks repeated sentences, repeat reviewer dates, marketing expressions, and service fit — approve only genuine reviews before publishing.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const cleanIds = reviews
+                    .filter((r) => {
+                      const hasLocalIssue = Boolean(integrity.issuesByReviewId[r.id]?.length);
+                      const audit = reviewAuditMap[r.id];
+                      return !hasLocalIssue && (!audit || audit.verdict === 'human');
+                    })
+                    .map((r) => r.id);
+                  onApproveCleanReviews(cleanIds);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Verify All Clean Rows</span>
+              </button>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 text-xs">
+              {[
+                {
+                  label: 'Repeated Sentences',
+                  val: integrity.repeatedSentenceCount,
+                  ok: integrity.repeatedSentenceCount === 0,
+                },
+                {
+                  label: 'Repeat Date Issues',
+                  val: integrity.repeatDateIssues + integrity.futureDateCount,
+                  ok: integrity.repeatDateIssues + integrity.futureDateCount === 0,
+                },
+                {
+                  label: 'Marketing Phrases',
+                  val: integrity.marketingPhraseCount,
+                  ok: integrity.marketingPhraseCount === 0,
+                },
+                {
+                  label: 'Off-Domain Wording',
+                  val: integrity.offDomainCount,
+                  ok: integrity.offDomainCount === 0,
+                },
+                {
+                  label: 'Verified to Publish',
+                  val: `${verifiedIds.length}/${reviews.length}`,
+                  ok: verifiedIds.length > 0,
+                },
+              ].map((m) => (
+                <div
+                  key={m.label}
+                  className="p-2.5 rounded-lg bg-slate-50/80 border border-slate-200/80 flex items-center justify-between gap-2"
+                >
+                  <span className="text-[11px] text-slate-500 truncate">{m.label}</span>
+                  <span
+                    className={`font-mono font-bold text-xs ${
+                      m.ok ? 'text-emerald-600' : 'text-rose-600'
+                    }`}
+                  >
+                    {m.val}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+
           {/* Top Flagged Signals Summary */}
           {topSignals.length > 0 && (
             <section className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
@@ -768,9 +864,34 @@ export function AIDetectorView({
                           )}
                         </div>
                       )}
+                      {integrity.issuesByReviewId[review.id]?.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {integrity.issuesByReviewId[review.id].map((iss, idx) => (
+                            <span
+                              key={idx}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200"
+                            >
+                              <AlertTriangle className="w-3 h-3 shrink-0" />
+                              {iss.detail}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => onToggleVerified(review.id)}
+                        title={verifiedSet.has(review.id) ? 'Verified for publishing (click to unverify)' : 'Mark as verified genuine review'}
+                        className={`p-2 rounded-lg transition-colors cursor-pointer ${
+                          verifiedSet.has(review.id)
+                            ? 'text-emerald-600 bg-emerald-50 border border-emerald-200'
+                            : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
+                        }`}
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                      </button>
                       {aiOnline && (
                         <button
                           type="button"

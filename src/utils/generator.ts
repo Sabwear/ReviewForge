@@ -354,7 +354,8 @@ function composeCandidateCopy(
   serviceMode = false,
   globalSubjectCounts?: Map<string, number>,
   globalOpenerCounts?: Map<string, number>,
-  companyName?: string
+  companyName?: string,
+  globalUsedSentences?: Set<string>
 ): { subject: string; body: string; voice: ReviewerVoice } {
   const adaptedLangPack = findAdaptedLanguagePack(adaptedPack, language);
   const catContext = !iptvMode
@@ -472,7 +473,7 @@ function composeCandidateCopy(
 
   // ~45% chance for service businesses: rich, non-generic 5-part story (problem, action, appointment, resolution, observation/company)
   if (serviceMode && !iptvMode && stars >= 3 && Math.random() < 0.45) {
-    const story = buildDetailedServiceStory(product, language, stars, companyName);
+    const story = buildDetailedServiceStory(product, language, stars, companyName, globalUsedSentences);
     if (story) {
       return { subject: story.subject, body: story.body, voice: 'technical' };
     }
@@ -541,7 +542,8 @@ function composeUniqueReviewCopy(
   serviceMode = false,
   globalSubjectCounts?: Map<string, number>,
   globalOpenerCounts?: Map<string, number>,
-  companyName?: string
+  companyName?: string,
+  globalUsedSentences?: Set<string>
 ): { subject: string; body: string; voice: ReviewerVoice } {
   // Phase 1: Up to 30 organic compositions with unique body + unique per-product subject
   for (let attempt = 0; attempt < 30; attempt++) {
@@ -557,7 +559,8 @@ function composeUniqueReviewCopy(
       serviceMode,
       globalSubjectCounts,
       globalOpenerCounts,
-      companyName
+      companyName,
+      globalUsedSentences
     );
     const normBody = normalizeReviewBody(candidate.body);
     const normSubj = normalizeReviewBody(candidate.subject);
@@ -782,8 +785,10 @@ export function generateSingleReviewForProduct(
   adaptedPack: BusinessVoicePack | null = null,
   allProductsForDetection: CatalogProduct[] = [product]
 ): GeneratedReview {
-  const startMs = Date.parse(config.dateStart) || Date.now() - 180 * 86400000;
-  const endMs = Math.max(startMs + 86400000, Date.parse(config.dateEnd) || Date.now());
+  const nowMs = Date.now();
+  const startMs = Math.min(nowMs - 86400000, Date.parse(config.dateStart) || nowMs - 180 * 86400000);
+  const rawEndMs = Date.parse(config.dateEnd) || nowMs;
+  const endMs = Math.max(startMs + 86400000, Math.min(rawEndMs, nowMs));
   const iptvMode = !adaptedPack && isIPTVCatalog(allProductsForDetection);
   const serviceMode = !iptvMode && isServiceCatalog(allProductsForDetection);
 
@@ -844,8 +849,10 @@ export function generateReviewDataset(
   const iptvMode = !adaptedPack && isIPTVCatalog(products);
   const serviceMode = !iptvMode && isServiceCatalog(products);
   const companyName = adaptedPack?.detectedBusinessName || config.storeBaseUrl?.replace(/^https?:\/\/(www\.)?/i, '').split('/')[0] || '';
-  const startMs = Date.parse(config.dateStart) || Date.now() - 180 * 86400000;
-  const endMs = Math.max(startMs + 86400000, Date.parse(config.dateEnd) || Date.now());
+  const nowMs = Date.now();
+  const startMs = Math.min(nowMs - 86400000, Date.parse(config.dateStart) || nowMs - 180 * 86400000);
+  const rawEndMs = Date.parse(config.dateEnd) || nowMs;
+  const endMs = Math.max(startMs + 86400000, Math.min(rawEndMs, nowMs));
 
   const curve =
     VOLUME_PRESET_CURVES[config.volumePreset] ?? VOLUME_PRESET_CURVES.realistic;
@@ -923,6 +930,7 @@ export function generateReviewDataset(
 
   // Global uniqueness & anti-repetition guards
   const globalUsedBodies = new Set<string>();
+  const globalUsedSentences = new Set<string>();
   const globalSubjectCounts = new Map<string, number>();
   const globalOpenerCounts = new Map<string, number>();
   const emailFrequency = new Map<string, number>();
@@ -946,9 +954,13 @@ export function generateReviewDataset(
         Math.random() * 100 < config.returningCustomerRate;
 
       if (tryReturning) {
-        // Cap each returning customer to at most 3 reviews total so emails never look spammy/repeated
+        // Strict repeat-reviewer integrity: max 2 reviews, never same service twice, >= 21 days apart, never past endMs
+        const minGapMs = 21 * 86400000;
         const candidates = returningPool.filter(
-          (c) => !c.reviewedProductKeys.has(productKey) && c.reviewedProductKeys.size < 3
+          (c) =>
+            !c.reviewedProductKeys.has(productKey) &&
+            c.reviewedProductKeys.size < 2 &&
+            c.lastReviewDateMs + minGapMs <= endMs
         );
         if (candidates.length > 0) {
           const customer = pickRandom(candidates);
@@ -957,9 +969,13 @@ export function generateReviewDataset(
           chosenName = customer.name;
           chosenLang = customer.language;
 
+          const maxNextMs = Math.min(endMs, customer.lastReviewDateMs + 65 * 86400000);
           const nextMs = Math.min(
             endMs,
-            customer.lastReviewDateMs + randomInt(10, 55) * 86400000
+            Math.max(
+              customer.lastReviewDateMs + minGapMs,
+              generateRandomDateMs(customer.lastReviewDateMs + minGapMs, maxNextMs)
+            )
           );
           dateMs = nextMs;
           customer.lastReviewDateMs = nextMs;
@@ -986,7 +1002,8 @@ export function generateReviewDataset(
         serviceMode,
         globalSubjectCounts,
         globalOpenerCounts,
-        companyName
+        companyName,
+        globalUsedSentences
       );
 
       emailFrequency.set(chosenEmail, (emailFrequency.get(chosenEmail) || 0) + 1);
