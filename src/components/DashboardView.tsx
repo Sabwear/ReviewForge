@@ -22,6 +22,8 @@ import {
   RotateCcw,
   Star,
 } from 'lucide-react';
+import { AIUsageRecord } from '../types/ai';
+import { AIUsageSection } from './AIUsageSection';
 import { SAMPLE_BUSINESSES } from '../data/sampleCatalog';
 import {
   CatalogProduct,
@@ -42,6 +44,11 @@ interface DashboardViewProps {
   onExportCSV: () => void;
   onOpenWorkbench: () => void;
   onLoadSampleBusiness: (id: SampleBusinessId) => void;
+  aiUsageHistory: AIUsageRecord[];
+  activeAIProviderLabel: string;
+  isAIConfigured: boolean;
+  onOpenAISettings: () => void;
+  onClearAIUsage: () => void;
 }
 
 type TimeGranularity = 'day' | 'week' | 'month';
@@ -241,6 +248,11 @@ export function DashboardView({
   onExportCSV,
   onOpenWorkbench,
   onLoadSampleBusiness,
+  aiUsageHistory,
+  activeAIProviderLabel,
+  isAIConfigured,
+  onOpenAISettings,
+  onClearAIUsage,
 }: DashboardViewProps) {
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [languageFilter, setLanguageFilter] = useState<ReviewLanguage | 'all'>('all');
@@ -569,6 +581,14 @@ export function DashboardView({
             </button>
           </div>
         </section>
+
+        <AIUsageSection
+          usageHistory={aiUsageHistory}
+          activeProviderLabel={activeAIProviderLabel}
+          isAIConfigured={isAIConfigured}
+          onOpenAISettings={onOpenAISettings}
+          onClearUsage={onClearAIUsage}
+        />
       </div>
     );
   }
@@ -1244,6 +1264,14 @@ export function DashboardView({
           </div>
         </>
       )}
+
+      <AIUsageSection
+        usageHistory={aiUsageHistory}
+        activeProviderLabel={activeAIProviderLabel}
+        isAIConfigured={isAIConfigured}
+        onOpenAISettings={onOpenAISettings}
+        onClearUsage={onClearAIUsage}
+      />
     </div>
   );
 }

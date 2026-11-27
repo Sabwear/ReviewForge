@@ -3,9 +3,12 @@ import { ConfigSidebar } from './components/ConfigSidebar';
 import { DashboardView } from './components/DashboardView';
 import { DatasetTableView } from './components/DatasetTableView';
 import { TemplateLibraryView } from './components/TemplateLibraryView';
+import { AISettingsModal } from './components/AISettingsModal';
 import { TopBar } from './components/TopBar';
 import { WorkbenchView } from './components/WorkbenchView';
+import { useAISettings } from './hooks/useAISettings';
 import { useTheme } from './hooks/useTheme';
+import { AI_PROVIDERS, AIUsageMetrics } from './types/ai';
 import { DEFAULT_REVIEW_TEMPLATES } from './data/reviewTemplates';
 import { CORE_TARGET_CATEGORIES, SAMPLE_BUSINESSES } from './data/sampleCatalog';
 import { isIPTVCatalog } from './data/universalComposer';
@@ -44,6 +47,34 @@ function getDefaultDateWindow(): { start: string; end: string } {
 
 export default function App() {
   const { theme, setTheme } = useTheme();
+  const {
+    settings: aiSettings,
+    updateSettings: updateAISettings,
+    selectProvider: selectAIProvider,
+    getRequestPayload: getAIRequestPayload,
+    isAIConfigured,
+    detectedModels,
+    isLoadingModels,
+    modelsError,
+    detectModels,
+    verifySecretCode,
+    usageHistory,
+    recordUsage,
+    clearUsageHistory,
+  } = useAISettings();
+  const [isAIModalOpen, setIsAIModalOpen] = useState(false);
+
+  const aiStatusLabel = useMemo(() => {
+    if (aiSettings.provider === 'fallback') {
+      return aiSettings.fallbackUnlocked
+        ? `Fallback · ${aiSettings.model || 'Active'}`
+        : 'Fallback (Locked)';
+    }
+    const meta = AI_PROVIDERS.find((p) => p.id === aiSettings.provider);
+    if (!isAIConfigured) return 'Configure AI';
+    return `${meta?.shortLabel || aiSettings.provider} · ${aiSettings.model || 'Default'}`;
+  }, [aiSettings, isAIConfigured]);
+
   const defaultDates = useMemo(() => getDefaultDateWindow(), []);
 
   const initialConfig: GeneratorConfig = useMemo(
@@ -131,11 +162,13 @@ export default function App() {
             url: trimmed,
             languages: config.selectedLanguages,
             businessContext: activeSampleId ? '' : businessContext,
+            aiConfig: getAIRequestPayload(),
           }),
         });
 
         const payload = (await response.json().catch(() => ({}))) as Partial<WebsiteScanResponse> & {
           error?: string;
+          aiUsage?: AIUsageMetrics | null;
         };
 
         if (reqId !== requestIdRef.current) return;
@@ -144,6 +177,10 @@ export default function App() {
           throw new Error(
             payload.error || `Website scan failed (HTTP ${response.status}).`
           );
+        }
+
+        if (payload.aiUsage) {
+          recordUsage('scan-website', payload.aiUsage, 'success');
         }
 
         const scannedProducts = payload.products;
@@ -186,7 +223,7 @@ export default function App() {
         }
       }
     },
-    [config, templates, businessContext, activeSampleId]
+    [config, templates, businessContext, activeSampleId, getAIRequestPayload, recordUsage]
   );
 
   const runBusinessAdaptation = useCallback(
@@ -221,20 +258,27 @@ export default function App() {
             businessContext: targetContext,
             filename: filename || sourceLabel,
             storeUrl: targetConfig.storeBaseUrl || targetProducts[0]?.product_url || '',
+            aiConfig: getAIRequestPayload(),
           }),
         });
 
         const payload = (await response.json().catch(() => ({}))) as {
           pack?: BusinessVoicePack;
+          aiUsage?: AIUsageMetrics | null;
           error?: string;
         };
 
         if (reqId !== requestIdRef.current) return;
 
         if (!response.ok || !payload.pack) {
+          recordUsage('adapt-business', payload.aiUsage, 'error', payload.error);
           throw new Error(
             payload.error || `Auto-scan request failed (HTTP ${response.status}).`
           );
+        }
+
+        if (payload.aiUsage) {
+          recordUsage('adapt-business', payload.aiUsage, 'success');
         }
 
         const pack = payload.pack;
@@ -543,6 +587,10 @@ export default function App() {
         onExportCSV={handleExportCSV}
         theme={theme}
         onThemeChange={setTheme}
+        aiStatusLabel={aiStatusLabel}
+        isAIConfigured={isAIConfigured}
+        isFallbackMode={aiSettings.provider === 'fallback'}
+        onOpenAISettings={() => setIsAIModalOpen(true)}
       />
 
       <div className="flex-1 w-full max-w-[1680px] mx-auto flex flex-col lg:flex-row">
@@ -619,6 +667,11 @@ export default function App() {
               onExportCSV={handleExportCSV}
               onOpenWorkbench={() => setActiveTab('workbench')}
               onLoadSampleBusiness={handleLoadSampleBusiness}
+              aiUsageHistory={usageHistory}
+              activeAIProviderLabel={aiStatusLabel}
+              isAIConfigured={isAIConfigured}
+              onOpenAISettings={() => setIsAIModalOpen(true)}
+              onClearAIUsage={clearUsageHistory}
             />
           )}
 
@@ -643,6 +696,22 @@ export default function App() {
           )}
         </main>
       </div>
+
+      <AISettingsModal
+        isOpen={isAIModalOpen}
+        onClose={() => setIsAIModalOpen(false)}
+        settings={aiSettings}
+        onUpdateSettings={updateAISettings}
+        onSelectProvider={selectAIProvider}
+        detectedModels={detectedModels}
+        isLoadingModels={isLoadingModels}
+        modelsError={modelsError}
+        onDetectModels={detectModels}
+        onVerifySecretCode={verifySecretCode}
+        usageHistory={usageHistory}
+        onClearUsage={clearUsageHistory}
+        onOpenDashboard={() => setActiveTab('dashboard')}
+      />
     </div>
   );
 }

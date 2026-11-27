@@ -6,6 +6,18 @@ import net from 'net';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
+  generateJsonWithAI,
+  getFallbackInfo,
+  isFallbackSecretValid,
+  listProviderModels,
+  resolveAIConfig,
+  SCAN_WEBSITE_JSON_HINT,
+  VOICE_PACK_JSON_HINT,
+  type AIConfigPayload,
+  type AIUsageMetrics,
+  type ServerAIEnv,
+} from './ai-core.ts';
+import {
   tryWooCommerce,
   extractJsonLdItems,
   extractSitemapItems,
@@ -660,6 +672,49 @@ const SCAN_WEBSITE_RESPONSE_SCHEMA = {
   ],
 };
 
+// ---------- API Route 0: AI Models & Secret Fallback Verification ----------
+
+function getServerAIEnv(): ServerAIEnv {
+  return {
+    GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+    GEMINI_MODEL: process.env.GEMINI_MODEL,
+    FALLBACK_SECRET_CODE: process.env.FALLBACK_SECRET_CODE,
+    FALLBACK_AI_PROVIDER: process.env.FALLBACK_AI_PROVIDER,
+    FALLBACK_AI_API_KEY: process.env.FALLBACK_AI_API_KEY,
+    FALLBACK_AI_MODEL: process.env.FALLBACK_AI_MODEL,
+    FALLBACK_AI_BASE_URL: process.env.FALLBACK_AI_BASE_URL,
+  };
+}
+
+app.post('/api/ai/models', async (req, res) => {
+  try {
+    const body = req.body as { aiConfig?: AIConfigPayload };
+    const result = await listProviderModels(body?.aiConfig, getServerAIEnv());
+    res.json(result);
+  } catch (err: unknown) {
+    res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to list models.' });
+  }
+});
+
+app.post('/api/ai/verify-secret', (req, res) => {
+  const body = req.body as { secretCode?: string };
+  const env = getServerAIEnv();
+  const fb = getFallbackInfo(env);
+  if (!fb.configured) {
+    res.status(404).json({ valid: false, configured: false, error: 'No server fallback AI key is configured.' });
+    return;
+  }
+  if (!fb.requiresSecret) {
+    res.json({ valid: true, configured: true, provider: fb.provider, defaultModel: fb.defaultModel });
+    return;
+  }
+  if (!isFallbackSecretValid(body?.secretCode, env)) {
+    res.status(403).json({ valid: false, configured: true, error: 'Incorrect secret access code.' });
+    return;
+  }
+  res.json({ valid: true, configured: true, provider: fb.provider, defaultModel: fb.defaultModel });
+});
+
 // ---------- API Route 1: Adapt Uploaded Product CSV ----------
 
 app.post('/api/adapt-business', async (req, res) => {
@@ -676,6 +731,7 @@ app.post('/api/adapt-business', async (req, res) => {
       businessContext?: string;
       filename?: string;
       storeUrl?: string;
+      aiConfig?: AIConfigPayload;
     };
 
     const products = Array.isArray(body?.products) ? body.products.slice(0, 50) : [];
@@ -700,7 +756,14 @@ app.post('/api/adapt-business', async (req, res) => {
       return;
     }
 
-    const ai = getGeminiClient();
+    const env = getServerAIEnv();
+    if (!resolveAIConfig(body?.aiConfig, env)) {
+      res.status(403).json({
+        error:
+          'No AI provider configured. Open AI Settings in the top bar to add your API key or enter the secret access code.',
+      });
+      return;
+    }
 
     const sampleList = products
       .map(
@@ -730,26 +793,14 @@ CRITICAL INSTRUCTIONS:
 7. STRICT LOW-STAR SAFETY GUARDRAIL (1-star & 2-star): NEVER allege scams, fraud, fakes, counterfeits, or undelivered orders. Low-star reviews must ONLY describe benign, realistic buyer friction (e.g., personal preference, fit/size mismatch, ordering wrong variant/color, outer shipping box dent, scheduling wait, or learning curve).
 8. Placeholders: Use ONLY {product}, {contextA}, {contextB}, {duration}, {timeframe}. Do NOT invent other placeholders.`;
 
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: prompt,
-      config: {
-        systemInstruction:
-          'You are a multilingual e-commerce and service-business localization specialist who analyzes uploaded catalogs and crafts authentic, category-accurate, non-generic customer review building blocks in any requested world language (including English, French, Spanish, German, Italian, Portuguese, Dutch, Arabic, Moroccan Darija in Latin script, Turkish, Russian, Chinese, Japanese, Korean, Hindi, and Polish).',
-        responseMimeType: 'application/json',
-        responseSchema: ADAPT_RESPONSE_SCHEMA,
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-      },
+    const { data, usage } = await generateJsonWithAI(body?.aiConfig, env, {
+      systemInstruction:
+        'You are a multilingual e-commerce and service-business localization specialist who analyzes uploaded catalogs and crafts authentic, category-accurate, non-generic customer review building blocks in any requested world language (including English, French, Spanish, German, Italian, Portuguese, Dutch, Arabic, Moroccan Darija in Latin script, Turkish, Russian, Chinese, Japanese, Korean, Hindi, and Polish).',
+      prompt,
+      jsonShapeHint: VOICE_PACK_JSON_HINT,
     });
 
-    const rawJson = (response.text ?? '').trim();
-    if (!rawJson) {
-      res.status(502).json({ error: 'Model returned an empty response. Please try again.' });
-      return;
-    }
-
-    const parsed = JSON.parse(rawJson);
-    res.json({ pack: parsed });
+    res.json({ pack: data, aiUsage: usage });
   } catch (err: unknown) {
     const message =
       err instanceof Error ? err.message : 'Failed to adapt review copy to your business.';
@@ -766,6 +817,7 @@ app.post('/api/scan-website', async (req, res) => {
       url?: string;
       languages?: string[];
       businessContext?: string;
+      aiConfig?: AIConfigPayload;
     };
 
     const rawUrl = typeof body?.url === 'string' ? body.url.trim() : '';
@@ -926,23 +978,18 @@ CRITICAL INSTRUCTIONS:
 8. Placeholders: Use ONLY {product}, {contextA}, {contextB}, {duration}, {timeframe}. Do NOT invent other placeholders.`;
 
     let parsed: ParsedScan | null = null;
-    if (ai) {
+    let aiUsage: AIUsageMetrics | null = null;
+    const serverEnv = getServerAIEnv();
+    if (resolveAIConfig(body?.aiConfig, serverEnv)) {
       try {
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: prompt,
-      config: {
-        systemInstruction:
-          'You are a multilingual business research and customer-experience copywriter who scans company websites, maps their real services or products, and writes authentic, non-generic customer review building blocks in any requested world language (including English, French, Spanish, German, Italian, Portuguese, Dutch, Arabic, Moroccan Darija in Latin script, Turkish, Russian, Chinese, Japanese, Korean, Hindi, and Polish).',
-        responseMimeType: 'application/json',
-        responseSchema: SCAN_WEBSITE_RESPONSE_SCHEMA,
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-      },
-    });
-
-    const rawJson = (response.text ?? '').trim();
-    if (!rawJson) throw new Error('Model returned an empty response.');
-    parsed = JSON.parse(rawJson) as ParsedScan;
+        const aiResult = await generateJsonWithAI<ParsedScan>(body?.aiConfig, serverEnv, {
+          systemInstruction:
+            'You are a multilingual business research and customer-experience copywriter who scans company websites, maps their real services or products, and writes authentic, non-generic customer review building blocks in any requested world language (including English, French, Spanish, German, Italian, Portuguese, Dutch, Arabic, Moroccan Darija in Latin script, Turkish, Russian, Chinese, Japanese, Korean, Hindi, and Polish).',
+          prompt,
+          jsonShapeHint: SCAN_WEBSITE_JSON_HINT,
+        });
+        parsed = aiResult.data;
+        aiUsage = aiResult.usage;
       } catch (aiErr) {
         console.warn('[scan-website] AI step failed, using keyless results:', aiErr instanceof Error ? aiErr.message : aiErr);
       }
@@ -1018,6 +1065,7 @@ CRITICAL INSTRUCTIONS:
           : finalOrigin,
       products: finalProducts,
       aiUsed: Boolean(parsed),
+      aiUsage,
       detectedBusinessName: parsed?.detectedBusinessName || businessNameFrom(scannedPages[0] || { ogSiteName: '', title: '' }, homeResult.finalUrl.hostname),
       pack: parsed
         ? {
