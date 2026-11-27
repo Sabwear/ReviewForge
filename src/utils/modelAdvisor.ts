@@ -29,11 +29,11 @@ export interface ProviderGuide {
 
 export const PROVIDER_GUIDES: Record<AIProviderId, ProviderGuide> = {
   gemini: {
-    topPick: 'gemini-2.5-flash',
-    runnerUp: 'gemini-2.5-pro',
+    topPick: 'gemini-3.8-flash',
+    runnerUp: 'gemini-3-flash',
     summary: 'Best overall fit for ReviewForge.',
     whyItFits:
-      'Native JSON mode, 1M+ context for multi-page website scrapes, fast latency, and top-tier Arabic, French & Darija fluency.',
+      'Native JSON mode, huge context for multi-page website scrapes, ultra-fast & low cost, and top-tier Arabic, French, Dutch & Darija fluency.',
   },
   openrouter: {
     topPick: 'google/gemini-2.5-flash',
@@ -106,7 +106,7 @@ export function evaluateModelFit(model: DetectedModel): ModelFitAssessment {
   }
 
   // ---- Reward top-performing families for ReviewForge ----
-  if (/gemini-2\.5-flash|gemini-3-flash|gemini-2\.0-flash/i.test(id)) {
+  if (/gemini-(3\.8|3\.5|3|2\.5|2\.0)-flash/i.test(id)) {
     jsonReliability = 96;
     multilingual = 96;
     speedValue = 97;

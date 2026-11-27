@@ -66,7 +66,7 @@ export const AI_PROVIDERS: ProviderMeta[] = [
     needsKey: true,
     needsBaseUrl: false,
     defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-    defaultModel: 'gemini-2.5-flash',
+    defaultModel: 'gemini-3.8-flash',
     keyPlaceholder: 'AIzaSy...',
     badge: 'Recommended',
   },

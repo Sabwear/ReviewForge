@@ -75,7 +75,7 @@ const DEFAULT_BASE_URLS: Record<Exclude<AIProviderId, 'fallback'>, string> = {
 };
 
 const DEFAULT_MODELS: Record<Exclude<AIProviderId, 'fallback'>, string> = {
-  gemini: 'gemini-2.5-flash',
+  gemini: 'gemini-3.8-flash',
   openrouter: 'google/gemini-2.5-flash',
   openai: 'gpt-4o-mini',
   groq: 'llama-3.3-70b-versatile',
@@ -303,8 +303,16 @@ export async function listProviderModels(
       })
       .sort((a, b) => {
         const score = (id: string) =>
-          id.includes('2.5-flash') ? 0 : id.includes('3-flash') ? 1 : id.includes('flash') ? 2 : id.includes('pro') ? 3 : 4;
-        return score(a.id) - score(b.id) || a.id.localeCompare(b.id);
+          id.includes('3.8-flash')
+            ? 0
+            : id.includes('3-flash') || id.includes('flash-lite')
+            ? 1
+            : id.includes('flash')
+            ? 2
+            : id.includes('pro')
+            ? 3
+            : 4;
+        return score(a.id) - score(b.id) || b.id.localeCompare(a.id);
       });
     return { models, provider, usedFallback };
   }
@@ -393,30 +401,39 @@ function extractJsonObject(raw: string): string {
   return trimmed;
 }
 
-export async function generateJsonWithAI<T = Record<string, unknown>>(
-  payload: AIConfigPayload | undefined,
-  env: ServerAIEnv,
-  opts: {
-    systemInstruction: string;
-    prompt: string;
-    jsonShapeHint?: string;
-  }
-): Promise<{ data: T; usage: AIUsageMetrics }> {
-  const resolved = resolveAIConfig(payload, env);
-  if (!resolved) {
-    throw new Error('No AI provider configured. Open AI Settings to add your API key or enter the secret access code.');
-  }
+function rankCheapestEfficient(models: DetectedModel[], failedModel: string): DetectedModel[] {
+  const failedLower = failedModel.toLowerCase();
+  const score = (m: DetectedModel): number => {
+    const id = m.id.toLowerCase();
+    if (/(embedding|imagen|veo|tts|whisper|audio|realtime|moderation|guard)/i.test(id)) return 999;
+    if (m.isFree) return 5;
+    if (id.includes('3.8-flash') || id.includes('flash-lite')) return 10;
+    if (id.includes('3-flash') || id.includes('3.5-flash')) return 12;
+    if (id.includes('flash')) return 15;
+    if (id.includes('nano') || id.includes('gpt-4o-mini') || id.includes('4.1-mini')) return 18;
+    if (id.includes('haiku') || id.includes('deepseek-chat') || id.includes('70b-versatile')) return 22;
+    if (id.includes('8b-instant') || id.includes('mini')) return 26;
+    if (id.includes('pro') || id.includes('sonnet')) return 40;
+    return 50;
+  };
+  return models
+    .filter((m) => m.id.toLowerCase() !== failedLower && score(m) < 900)
+    .sort((a, b) => score(a) - score(b) || b.id.localeCompare(a.id));
+}
 
-  const { provider, apiKey, model, baseUrl, usedFallback } = resolved;
-  const startedAt = Date.now();
+function isModelUnavailableError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /\b(404|400|429|503)\b|no longer available|not found|deprecated|not supported|model.*does not exist|quota|overloaded/i.test(
+    msg
+  );
+}
 
-  const fullPrompt = opts.jsonShapeHint
-    ? `${opts.prompt}\n\nRETURN ONLY VALID JSON (no markdown, no commentary) matching this exact structure:\n${opts.jsonShapeHint}`
-    : `${opts.prompt}\n\nRETURN ONLY VALID JSON (no markdown fences, no commentary).`;
-
-  let rawText = '';
-  let promptTokens = 0;
-  let completionTokens = 0;
+async function callProviderJsonOnce(
+  resolved: ResolvedAI,
+  systemInstruction: string,
+  fullPrompt: string
+): Promise<{ rawText: string; promptTokens: number; completionTokens: number }> {
+  const { provider, apiKey, model, baseUrl } = resolved;
 
   if (provider === 'gemini') {
     const url = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
@@ -425,7 +442,7 @@ export async function generateJsonWithAI<T = Record<string, unknown>>(
       signal: AbortSignal.timeout(AI_TIMEOUT_MS),
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: opts.systemInstruction }] },
+        systemInstruction: { parts: [{ text: systemInstruction }] },
         contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
         generationConfig: {
           responseMimeType: 'application/json',
@@ -441,10 +458,14 @@ export async function generateJsonWithAI<T = Record<string, unknown>>(
       candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
       usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
     };
-    rawText = json.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || '';
-    promptTokens = json.usageMetadata?.promptTokenCount || 0;
-    completionTokens = json.usageMetadata?.candidatesTokenCount || 0;
-  } else if (provider === 'ollama') {
+    return {
+      rawText: json.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || '',
+      promptTokens: json.usageMetadata?.promptTokenCount || 0,
+      completionTokens: json.usageMetadata?.candidatesTokenCount || 0,
+    };
+  }
+
+  if (provider === 'ollama') {
     const res = await fetch(`${baseUrl}/api/chat`, {
       method: 'POST',
       signal: AbortSignal.timeout(AI_TIMEOUT_MS),
@@ -454,7 +475,7 @@ export async function generateJsonWithAI<T = Record<string, unknown>>(
         stream: false,
         format: 'json',
         messages: [
-          { role: 'system', content: opts.systemInstruction },
+          { role: 'system', content: systemInstruction },
           { role: 'user', content: fullPrompt },
         ],
       }),
@@ -468,59 +489,123 @@ export async function generateJsonWithAI<T = Record<string, unknown>>(
       prompt_eval_count?: number;
       eval_count?: number;
     };
-    rawText = json.message?.content || '';
-    promptTokens = json.prompt_eval_count || 0;
-    completionTokens = json.eval_count || 0;
-  } else {
-    // OpenRouter / OpenAI / Groq / Custom OpenAI-compatible
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-    if (provider === 'openrouter') {
-      headers['HTTP-Referer'] = 'https://reviewforge.app';
-      headers['X-Title'] = 'ReviewForge';
-    }
-
-    const res = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      signal: AbortSignal.timeout(AI_TIMEOUT_MS),
-      headers,
-      body: JSON.stringify({
-        model,
-        temperature: 0.7,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: opts.systemInstruction },
-          { role: 'user', content: fullPrompt },
-        ],
-      }),
-    });
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      throw new Error(`${provider} error (${res.status}): ${errText.slice(0, 220) || res.statusText}`);
-    }
-    const json = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    return {
+      rawText: json.message?.content || '',
+      promptTokens: json.prompt_eval_count || 0,
+      completionTokens: json.eval_count || 0,
     };
-    rawText = json.choices?.[0]?.message?.content || '';
-    promptTokens = json.usage?.prompt_tokens || 0;
-    completionTokens = json.usage?.completion_tokens || 0;
   }
+
+  // OpenRouter / OpenAI / Groq / Custom OpenAI-compatible
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  if (provider === 'openrouter') {
+    headers['HTTP-Referer'] = 'https://reviewforge.app';
+    headers['X-Title'] = 'ReviewForge';
+  }
+
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(AI_TIMEOUT_MS),
+    headers,
+    body: JSON.stringify({
+      model,
+      temperature: 0.7,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: systemInstruction },
+        { role: 'user', content: fullPrompt },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`${provider} error (${res.status}): ${errText.slice(0, 220) || res.statusText}`);
+  }
+  const json = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    usage?: { prompt_tokens?: number; completion_tokens?: number };
+  };
+  return {
+    rawText: json.choices?.[0]?.message?.content || '',
+    promptTokens: json.usage?.prompt_tokens || 0,
+    completionTokens: json.usage?.completion_tokens || 0,
+  };
+}
+
+export async function generateJsonWithAI<T = Record<string, unknown>>(
+  payload: AIConfigPayload | undefined,
+  env: ServerAIEnv,
+  opts: {
+    systemInstruction: string;
+    prompt: string;
+    jsonShapeHint?: string;
+  }
+): Promise<{ data: T; usage: AIUsageMetrics }> {
+  const resolved = resolveAIConfig(payload, env);
+  if (!resolved) {
+    throw new Error('No AI provider configured. Open AI Settings to add your API key or enter the secret access code.');
+  }
+
+  const startedAt = Date.now();
+  const fullPrompt = opts.jsonShapeHint
+    ? `${opts.prompt}\n\nRETURN ONLY VALID JSON (no markdown, no commentary) matching this exact structure:\n${opts.jsonShapeHint}`
+    : `${opts.prompt}\n\nRETURN ONLY VALID JSON (no markdown fences, no commentary).`;
+
+  let activeModel = resolved.model;
+  let result: { rawText: string; promptTokens: number; completionTokens: number } | null = null;
+  let lastError: unknown = null;
+
+  try {
+    result = await callProviderJsonOnce(resolved, opts.systemInstruction, fullPrompt);
+  } catch (err) {
+    lastError = err;
+    // Automatic smart fallback to the cheapest & most efficient working model on this provider
+    if (isModelUnavailableError(err)) {
+      try {
+        const listed = await listProviderModels(payload, env);
+        const candidates = rankCheapestEfficient(listed.models, resolved.model).slice(0, 3);
+        for (const candidate of candidates) {
+          try {
+            activeModel = candidate.id;
+            result = await callProviderJsonOnce(
+              { ...resolved, model: candidate.id },
+              opts.systemInstruction,
+              fullPrompt
+            );
+            lastError = null;
+            break;
+          } catch (retryErr) {
+            lastError = retryErr;
+          }
+        }
+      } catch {
+        // Keep original error if model discovery itself fails
+      }
+    }
+  }
+
+  if (!result) {
+    throw lastError instanceof Error ? lastError : new Error('AI request failed.');
+  }
+
+  const { provider, usedFallback } = resolved;
+  const { rawText } = result;
+  let { promptTokens, completionTokens } = result;
 
   const latencyMs = Date.now() - startedAt;
   const cleaned = extractJsonObject(rawText);
   if (!cleaned) {
-    throw new Error(`Model (${model}) returned an empty response. Please try again.`);
+    throw new Error(`Model (${activeModel}) returned an empty response. Please try again.`);
   }
 
   let parsed: T;
   try {
     parsed = JSON.parse(cleaned) as T;
   } catch {
-    throw new Error(`Model (${model}) returned invalid JSON. Try another model (e.g. Gemini Flash or GPT-4o mini).`);
+    throw new Error(`Model (${activeModel}) returned invalid JSON. Try another model.`);
   }
 
-  // Fallback token estimation if provider omitted counts
   if (promptTokens === 0) promptTokens = Math.max(1, Math.round((opts.systemInstruction.length + fullPrompt.length) / 4));
   if (completionTokens === 0) completionTokens = Math.max(1, Math.round(rawText.length / 4));
   const totalTokens = promptTokens + completionTokens;
@@ -530,12 +615,12 @@ export async function generateJsonWithAI<T = Record<string, unknown>>(
     usage: {
       provider,
       usedFallback,
-      model,
+      model: activeModel,
       promptTokens,
       completionTokens,
       totalTokens,
       latencyMs,
-      estimatedCostUsd: estimateCostUsd(provider, model, promptTokens, completionTokens),
+      estimatedCostUsd: estimateCostUsd(provider, activeModel, promptTokens, completionTokens),
     },
   };
 }

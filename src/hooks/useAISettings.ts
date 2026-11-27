@@ -25,7 +25,7 @@ const MAX_USAGE_RECORDS = 500;
 const DEFAULT_SETTINGS: AISettings = {
   provider: 'gemini',
   apiKey: '',
-  model: 'gemini-2.5-flash',
+  model: 'gemini-3.8-flash',
   baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
   secretCode: '',
   fallbackUnlocked: false,
@@ -299,6 +299,9 @@ export function useAISettings() {
     ) => {
       if (status === 'success') {
         setConnectionStatus('online');
+        if (metrics?.model && metrics.model !== settings.model) {
+          setSettingsState((prev) => ({ ...prev, model: metrics.model }));
+        }
       }
       const fallbackProvider =
         settings.provider === 'fallback'

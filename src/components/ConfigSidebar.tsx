@@ -195,6 +195,16 @@ export function ConfigSidebar({
   };
 
   const [languageSort, setLanguageSort] = useState<'selected' | 'alpha' | 'region'>('selected');
+  const [minDraft, setMinDraft] = useState<string>(String(config.minReviewsPerItem));
+  const [maxDraft, setMaxDraft] = useState<string>(String(config.maxReviewsPerItem));
+
+  React.useEffect(() => {
+    setMinDraft(String(config.minReviewsPerItem));
+  }, [config.minReviewsPerItem]);
+
+  React.useEffect(() => {
+    setMaxDraft(String(config.maxReviewsPerItem));
+  }, [config.maxReviewsPerItem]);
 
   const filteredLanguageOptions = React.useMemo(() => {
     const q = languageSearch.trim().toLowerCase();
@@ -984,9 +994,25 @@ export function ConfigSidebar({
                 type="number"
                 min={0}
                 max={50}
-                value={config.minReviewsPerItem}
+                value={minDraft}
                 onChange={(e) => {
-                  const nextMin = Math.max(0, Math.min(50, Number(e.target.value) || 0));
+                  const val = e.target.value;
+                  setMinDraft(val);
+                  if (val.trim() === '') return;
+                  const parsed = Math.floor(Number(val));
+                  if (!Number.isNaN(parsed)) {
+                    const nextMin = Math.max(0, Math.min(50, parsed));
+                    onConfigChange({
+                      ...config,
+                      minReviewsPerItem: nextMin,
+                      maxReviewsPerItem: Math.max(nextMin, config.maxReviewsPerItem),
+                    });
+                  }
+                }}
+                onBlur={() => {
+                  const parsed = Math.floor(Number(minDraft));
+                  const nextMin = Number.isNaN(parsed) ? 0 : Math.max(0, Math.min(50, parsed));
+                  setMinDraft(String(nextMin));
                   onConfigChange({
                     ...config,
                     minReviewsPerItem: nextMin,
@@ -1009,12 +1035,29 @@ export function ConfigSidebar({
                 type="number"
                 min={1}
                 max={100}
-                value={config.maxReviewsPerItem}
+                value={maxDraft}
                 onChange={(e) => {
-                  const raw = Math.max(1, Math.min(100, Number(e.target.value) || 1));
+                  const val = e.target.value;
+                  setMaxDraft(val);
+                  if (val.trim() === '') return;
+                  const parsed = Math.floor(Number(val));
+                  if (!Number.isNaN(parsed) && parsed >= 1) {
+                    const clamped = Math.min(100, parsed);
+                    onConfigChange({
+                      ...config,
+                      maxReviewsPerItem: clamped,
+                      minReviewsPerItem: Math.min(config.minReviewsPerItem, clamped),
+                    });
+                  }
+                }}
+                onBlur={() => {
+                  const parsed = Math.floor(Number(maxDraft));
+                  const nextMax = Number.isNaN(parsed) || parsed < 1 ? 1 : Math.min(100, parsed);
+                  const safeMax = Math.max(config.minReviewsPerItem, nextMax);
+                  setMaxDraft(String(safeMax));
                   onConfigChange({
                     ...config,
-                    maxReviewsPerItem: Math.max(config.minReviewsPerItem, raw),
+                    maxReviewsPerItem: safeMax,
                   });
                 }}
                 className="w-full h-9 px-2.5 rounded-lg border border-slate-300 bg-white font-mono tabular-nums text-xs text-slate-900 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/20"
