@@ -5,6 +5,7 @@ import { DashboardView } from './components/DashboardView';
 import { DatasetTableView } from './components/DatasetTableView';
 import { TemplateLibraryView } from './components/TemplateLibraryView';
 import { AISettingsModal } from './components/AISettingsModal';
+import { LoadingOperationType, LoadingProgressModal } from './components/LoadingProgressModal';
 import { TopBar } from './components/TopBar';
 import { WorkbenchView } from './components/WorkbenchView';
 import { useAISettings } from './hooks/useAISettings';
@@ -645,7 +646,7 @@ export default function App() {
           }),
         });
         const payload = (await res.json().catch(() => ({}))) as {
-          results?: Array<{ id: string; humanScore: number; verdict: 'human' | 'generic' | 'ai_flagged'; reason: string }>;
+          results?: ReviewAuditEntry[] & Array<{ id: string }>;
           aiUsage?: AIUsageMetrics | null;
           error?: string;
         };
@@ -664,6 +665,10 @@ export default function App() {
               humanScore: item.humanScore,
               verdict: item.verdict,
               reason: item.reason,
+              signals: item.signals,
+              flaggedPhrases: item.flaggedPhrases,
+              suggestion: item.suggestion,
+              dimensions: item.dimensions,
               auditedAt: nowIso,
             };
           }
@@ -978,6 +983,26 @@ export default function App() {
         onOpenDashboard={() => setActiveTab('dashboard')}
         connectionStatus={connectionStatus}
         serverFallback={serverFallback}
+      />
+
+      <LoadingProgressModal
+        operation={
+          (isScanningWebsite
+            ? 'scan'
+            : isAdapting
+            ? 'adapt'
+            : isAuditingReviews
+            ? 'detect'
+            : isRewritingReviews
+            ? 'rewrite'
+            : null) as LoadingOperationType | null
+        }
+        detailText={
+          isScanningWebsite && websiteUrl
+            ? `Scanning ${websiteUrl} and extracting offerings…`
+            : undefined
+        }
+        aiLabel={aiStatusLabel}
       />
     </div>
   );

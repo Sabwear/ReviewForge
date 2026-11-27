@@ -668,6 +668,14 @@ export interface ReviewAuditResult {
   humanScore: number; // 0-100 (higher = more human & domain-accurate)
   verdict: 'human' | 'generic' | 'ai_flagged';
   reason: string;
+  signals: string[];
+  flaggedPhrases: string[];
+  suggestion: string;
+  dimensions: {
+    naturalTone: number;
+    domainFit: number;
+    specificity: number;
+  };
 }
 
 export async function detectReviewsWithAI(
@@ -684,7 +692,7 @@ export async function detectReviewsWithAI(
     )
     .join('\n');
 
-  const prompt = `Audit these generated customer reviews for authenticity, natural human phrasing, and business-domain accuracy.
+  const prompt = `Audit these generated customer reviews in depth for authenticity, natural human phrasing, and business-domain accuracy.
 
 Business context: ${businessContext || '(Infer from offerings — pay close attention to whether this is a SERVICE business like plumbing/heating/clinic/agency vs an e-commerce store)'}
 
@@ -692,29 +700,54 @@ Reviews to audit:
 ${formatted}
 
 SCORING RULES (strict):
-- Give LOW humanScore (10–45, verdict="ai_flagged") if a review:
+- Give LOW humanScore (10–49, verdict="ai_flagged") if a review:
   * Uses e-commerce/shipping/packaging/gift/item-swap phrasing ("bought", "shipping", "box", "packaging", "colis", "emballage", "cet article", "dit artikel", "cadeau") for a SERVICE business!
   * Sounds robotic, overly polished, or uses AI clichés ("game-changer", "exceeded expectations", "thoughtful and sturdy").
   * Reviews a city name or navigation label as if it were a product.
 - Give MEDIUM humanScore (50–74, verdict="generic") if it is grammatically fine but too vague/template-like and could apply to any business.
-- Give HIGH humanScore (75–98, verdict="human") if it sounds like a real human client/buyer with natural cadence and concrete, domain-accurate details.`;
+- Give HIGH humanScore (75–98, verdict="human") if it sounds like a real human client/buyer with natural cadence and concrete, domain-accurate details.
 
-  const { data, usage } = await generateJsonWithAI<{ results?: ReviewAuditResult[] }>(payload, env, {
+For EVERY review ID, return:
+- humanScore (0-100) and verdict ("human" | "generic" | "ai_flagged")
+- dimensions: naturalTone (0-100), domainFit (0-100), specificity (0-100)
+- reason: clear 1-sentence explanation of WHY it scored this way
+- signals: 2-3 short tags (e.g. "Off-domain e-commerce wording", "AI cliché", "Too generic", "Natural cadence", "Concrete service detail")
+- flaggedPhrases: exact words/phrases quoted from the review that look AI/generic/off-domain (empty array [] if human)
+- suggestion: concrete 1-sentence tip to improve it (or "Looks authentic — ready to export." if human)`;
+
+  const { data, usage } = await generateJsonWithAI<{ results?: Partial<ReviewAuditResult>[] }>(payload, env, {
     systemInstruction:
-      'You are a strict multilingual review authenticity detector and QA editor. Return concise, honest humanScore (0-100), verdict ("human" | "generic" | "ai_flagged"), and a crisp 6-14 word reason for every review ID.',
+      'You are a strict multilingual review authenticity detector and forensic QA editor. Return rich, structured diagnostics explaining exactly WHY each review passed or was flagged.',
     prompt,
-    jsonShapeHint: `{ "results": [{ "id": "exact-id", "humanScore": 85, "verdict": "human", "reason": "Natural tone with concrete service detail." }] }`,
+    jsonShapeHint: `{ "results": [{ "id": "exact-id", "humanScore": 42, "verdict": "ai_flagged", "reason": "Mentions shipping box and packaging for a plumbing repair service.", "signals": ["Off-domain wording", "E-commerce template"], "flaggedPhrases": ["shipping box", "packaging"], "suggestion": "Replace shipping mention with technician punctuality and repair quality.", "dimensions": { "naturalTone": 65, "domainFit": 18, "specificity": 40 } }] }`,
   });
 
+  const clamp = (n: unknown, fb: number) =>
+    Math.max(0, Math.min(100, Math.round(typeof n === 'number' && !Number.isNaN(n) ? n : fb)));
+
   const normalized: ReviewAuditResult[] = (data?.results || []).map((r) => {
-    const score = Math.max(0, Math.min(100, Math.round(Number(r.humanScore) || 50)));
+    const score = clamp(r.humanScore, 50);
     const verdict: ReviewAuditResult['verdict'] =
       score >= 75 ? 'human' : score >= 50 ? 'generic' : 'ai_flagged';
     return {
-      id: String(r.id),
+      id: String(r.id || ''),
       humanScore: score,
       verdict,
-      reason: String(r.reason || '').slice(0, 140) || 'Evaluated by AI detector.',
+      reason: String(r.reason || '').slice(0, 180) || 'Evaluated by AI detector.',
+      signals: Array.isArray(r.signals)
+        ? r.signals.map((s) => String(s).trim()).filter(Boolean).slice(0, 4)
+        : [],
+      flaggedPhrases: Array.isArray(r.flaggedPhrases)
+        ? r.flaggedPhrases.map((p) => String(p).trim()).filter(Boolean).slice(0, 5)
+        : [],
+      suggestion:
+        String(r.suggestion || '').slice(0, 180) ||
+        (verdict === 'human' ? 'Looks authentic — ready to export.' : 'Rewrite with specific business details.'),
+      dimensions: {
+        naturalTone: clamp(r.dimensions?.naturalTone, score),
+        domainFit: clamp(r.dimensions?.domainFit, score),
+        specificity: clamp(r.dimensions?.specificity, score),
+      },
     };
   });
 

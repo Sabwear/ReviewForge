@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -32,7 +32,37 @@ export interface ReviewAuditEntry {
   humanScore: number;
   verdict: 'human' | 'generic' | 'ai_flagged';
   reason: string;
+  signals?: string[];
+  flaggedPhrases?: string[];
+  suggestion?: string;
+  dimensions?: {
+    naturalTone: number;
+    domainFit: number;
+    specificity: number;
+  };
   auditedAt?: string;
+}
+
+function highlightFlaggedText(text: string, phrases?: string[]): React.ReactNode {
+  if (!phrases || phrases.length === 0) return text;
+  const escaped = phrases
+    .filter((p) => p.trim().length >= 3)
+    .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  if (escaped.length === 0) return text;
+  const regex = new RegExp(`(${escaped.join('|')})`, 'gi');
+  const parts = text.split(regex);
+  return parts.map((part, idx) =>
+    idx % 2 === 1 ? (
+      <mark
+        key={idx}
+        className="px-1 py-0.5 rounded bg-rose-100 text-rose-800 dark:bg-[#E58388]/20 dark:text-[#E58388] font-medium"
+      >
+        {part}
+      </mark>
+    ) : (
+      part
+    )
+  );
 }
 
 export interface AuditRunSummary {
@@ -199,6 +229,23 @@ export function AIDetectorView({
       }))
       .sort((a, b) => a.avgScore - b.avgScore);
   }, [reviews, reviewAuditMap, langMap]);
+
+  const topSignals = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of reviews) {
+      const a = reviewAuditMap[r.id];
+      if (!a || a.verdict === 'human' || !a.signals) continue;
+      for (const s of a.signals) {
+        const key = s.trim();
+        if (!key) continue;
+        map.set(key, (map.get(key) || 0) + 1);
+      }
+    }
+    return Array.from(map.entries())
+      .map(([signal, count]) => ({ signal, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8);
+  }, [reviews, reviewAuditMap]);
 
   const filteredReviews = useMemo(() => {
     return reviews.filter((r) => {
@@ -548,6 +595,33 @@ export function AIDetectorView({
             </div>
           </section>
 
+          {/* Top Flagged Signals Summary */}
+          {topSignals.length > 0 && (
+            <section className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  Why Reviews Were Flagged (Top Signals)
+                </h2>
+                <span className="text-[11px] text-slate-500">
+                  Detected across {stats.generic + stats.aiFlagged} flagged reviews
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {topSignals.map((item) => (
+                  <span
+                    key={item.signal}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200"
+                  >
+                    <span>{item.signal}</span>
+                    <span className="px-1.5 py-0.2 rounded bg-white/70 dark:bg-black/20 font-mono text-[10px] font-bold">
+                      {item.count}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            </section>
+          )}
+
           {/* Filterable Review Audit Inspector */}
           <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
             <div className="px-5 py-3.5 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-3">
@@ -623,14 +697,76 @@ export function AIDetectorView({
                       </div>
 
                       <div dir={review.language === 'ar' || review.language === 'he' ? 'rtl' : 'ltr'}>
-                        <p className="text-sm font-semibold text-slate-900">{review.subject}</p>
-                        <p className="text-xs text-slate-600 leading-relaxed">{review.body}</p>
+                        <p className="text-sm font-semibold text-slate-900">
+                          {highlightFlaggedText(review.subject, audit?.flaggedPhrases)}
+                        </p>
+                        <p className="text-xs text-slate-600 leading-relaxed">
+                          {highlightFlaggedText(review.body, audit?.flaggedPhrases)}
+                        </p>
                       </div>
 
                       {audit && (
-                        <p className="text-[11px] text-slate-500">
-                          Detector: <span className="text-slate-700">{audit.reason}</span>
-                        </p>
+                        <div className="mt-2 p-3 rounded-lg bg-slate-50/80 border border-slate-200/80 space-y-2">
+                          <div className="text-[11px] text-slate-700">
+                            <span className="font-semibold text-slate-900">Why:</span> {audit.reason}
+                          </div>
+
+                          {audit.dimensions && (
+                            <div className="grid grid-cols-3 gap-2.5 max-w-md">
+                              {[
+                                { label: 'Natural Tone', val: audit.dimensions.naturalTone },
+                                { label: 'Domain Fit', val: audit.dimensions.domainFit },
+                                { label: 'Specificity', val: audit.dimensions.specificity },
+                              ].map((d) => (
+                                <div key={d.label} className="space-y-0.5">
+                                  <div className="flex items-center justify-between text-[10px] text-slate-500">
+                                    <span>{d.label}</span>
+                                    <span className="font-mono font-semibold text-slate-700">{d.val}%</span>
+                                  </div>
+                                  <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                                    <div
+                                      className="h-full rounded-full"
+                                      style={{
+                                        width: `${d.val}%`,
+                                        backgroundColor:
+                                          d.val >= 75
+                                            ? VERDICT_COLORS.human
+                                            : d.val >= 50
+                                            ? VERDICT_COLORS.generic
+                                            : VERDICT_COLORS.ai_flagged,
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {audit.signals && audit.signals.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {audit.signals.map((sig) => (
+                                <span
+                                  key={sig}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                                    audit.verdict === 'human'
+                                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                      : audit.verdict === 'generic'
+                                      ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                      : 'bg-rose-50 text-rose-700 border border-rose-200'
+                                  }`}
+                                >
+                                  {sig}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {audit.suggestion && audit.verdict !== 'human' && (
+                            <div className="text-[11px] text-sky-700">
+                              <span className="font-semibold">Tip:</span> {audit.suggestion}
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
 
