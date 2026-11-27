@@ -38,6 +38,12 @@ import {
   ReviewerVoice,
   StoreVolumePreset,
 } from '../types/reviews';
+import {
+  applyHumanImperfections,
+  buildUltraShortReview,
+  EXTRA_DIVERSE_SUBJECTS,
+  getServiceSpecificSentence,
+} from './humanizer';
 import { resolveProductUrl } from './csv';
 
 export function parseExclusionKeywords(raw: string): string[] {
@@ -322,6 +328,19 @@ function findStarPoolInPack(
   return pack.stars.find((s) => s.openers.length > 0 && s.subjects.length > 0) ?? null;
 }
 
+function pickLeastUsed(arr: string[], usageMap?: Map<string, number>): string {
+  if (!usageMap || arr.length <= 1) return pickRandom(arr);
+  let minCount = Infinity;
+  for (const item of arr) {
+    const c = usageMap.get(item) || 0;
+    if (c < minCount) minCount = c;
+  }
+  const leastUsed = arr.filter((item) => (usageMap.get(item) || 0) === minCount);
+  const chosen = pickRandom(leastUsed);
+  usageMap.set(chosen, (usageMap.get(chosen) || 0) + 1);
+  return chosen;
+}
+
 function composeCandidateCopy(
   product: CatalogProduct,
   language: ReviewLanguage,
@@ -331,7 +350,9 @@ function composeCandidateCopy(
   iptvMode: boolean,
   forceExtraTail: boolean,
   forceLiteralProduct: boolean,
-  serviceMode = false
+  serviceMode = false,
+  globalSubjectCounts?: Map<string, number>,
+  globalOpenerCounts?: Map<string, number>
 ): { subject: string; body: string; voice: ReviewerVoice } {
   const adaptedLangPack = findAdaptedLanguagePack(adaptedPack, language);
   const catContext = !iptvMode
@@ -438,23 +459,44 @@ function composeCandidateCopy(
     }
   }
 
-  const subject = hydrate(pickRandom(subjects));
+  // ~16% chance of an ultra-short, punchy mobile-typed human review (when not forcing extra tail)
+  if (!forceExtraTail && !iptvMode && Math.random() < 0.16) {
+    const ultraShort = buildUltraShortReview(product, language, stars, serviceMode);
+    if (ultraShort) {
+      const humanized = applyHumanImperfections(ultraShort.subject, ultraShort.body, language);
+      return { subject: humanized.subject, body: humanized.body, voice: 'minimalist' };
+    }
+  }
 
-  // Vary structure naturally: 1-sentence short note (~24%), 2-sentence casual (~50%), 3-sentence detailed (~26%)
+  // Merge extra diverse subjects so titles stay varied across large datasets
+  const extraSubs = EXTRA_DIVERSE_SUBJECTS[language]?.[stars] || [];
+  const mergedSubjects = extraSubs.length > 0 ? [...subjects, ...extraSubs] : subjects;
+  const rawSubject = hydrate(pickLeastUsed(mergedSubjects, globalSubjectCounts));
+
+  // Vary structure naturally: 1-sentence short note (~26%), 2-sentence casual (~48%), 3-sentence detailed (~26%)
   const structureRoll = Math.random();
   const sentences: string[] = [];
+  const chosenOpener = pickLeastUsed(openers, globalOpenerCounts);
 
-  if (structureRoll < 0.24 && !forceExtraTail) {
-    sentences.push(pickRandom(openers));
+  // For service businesses, inject a concrete service-matched detail (boiler/leak/emergency/install) ~55% of the time
+  const serviceDetail =
+    serviceMode && !iptvMode && Math.random() < 0.55
+      ? getServiceSpecificSentence(product, language, stars)
+      : null;
+
+  if (structureRoll < 0.26 && !forceExtraTail) {
+    sentences.push(serviceDetail && Math.random() < 0.45 ? serviceDetail : chosenOpener);
   } else if (structureRoll < 0.56) {
-    sentences.push(pickRandom(openers));
-    if (middles.length > 0) sentences.push(pickRandom(middles));
+    sentences.push(chosenOpener);
+    if (serviceDetail) sentences.push(serviceDetail);
+    else if (middles.length > 0) sentences.push(pickRandom(middles));
   } else if (structureRoll < 0.74) {
-    sentences.push(pickRandom(openers));
+    sentences.push(chosenOpener);
     if (closers.length > 0) sentences.push(pickRandom(closers));
   } else {
-    sentences.push(pickRandom(openers));
-    if (middles.length > 0) sentences.push(pickRandom(middles));
+    sentences.push(chosenOpener);
+    if (serviceDetail) sentences.push(serviceDetail);
+    else if (middles.length > 0) sentences.push(pickRandom(middles));
     if (closers.length > 0) sentences.push(pickRandom(closers));
   }
 
@@ -462,14 +504,11 @@ function composeCandidateCopy(
     sentences.push(pickRandom(extraTails));
   }
 
-  let body = sentences.map((s) => hydrate(s)).join(' ');
-
-  if (language !== 'ar' && sentences.length === 1 && Math.random() < 0.22 && body.endsWith('.')) {
-    body = body.slice(0, -1);
-  }
+  const rawBody = sentences.map((s) => hydrate(s)).join(' ');
+  const { subject, body } = applyHumanImperfections(rawSubject, rawBody, language);
 
   const hasDetailHint =
-    /50fps|epg|xtream|m3u|bitrate|1080p|amoled|gps|anc|bluetooth|battery|batterie|matepad|pencil|usb-c|spf|cotton|leather|roast|espresso/i.test(
+    /50fps|epg|xtream|m3u|bitrate|1080p|amoled|gps|anc|bluetooth|battery|batterie|matepad|pencil|usb-c|spf|cotton|leather|roast|espresso|boiler|pressure|radiator|leak|pipe|ketel|chaudière/i.test(
       body
     );
   const voice = pickVoiceStyleForLength(sentences.length, hasDetailHint);
@@ -489,7 +528,9 @@ function composeUniqueReviewCopy(
   iptvMode: boolean,
   globalUsedBodies: Set<string>,
   productUsedSubjects: Set<string>,
-  serviceMode = false
+  serviceMode = false,
+  globalSubjectCounts?: Map<string, number>,
+  globalOpenerCounts?: Map<string, number>
 ): { subject: string; body: string; voice: ReviewerVoice } {
   // Phase 1: Up to 30 organic compositions with unique body + unique per-product subject
   for (let attempt = 0; attempt < 30; attempt++) {
@@ -502,7 +543,9 @@ function composeUniqueReviewCopy(
       iptvMode,
       attempt >= 16,
       attempt >= 10,
-      serviceMode
+      serviceMode,
+      globalSubjectCounts,
+      globalOpenerCounts
     );
     const normBody = normalizeReviewBody(candidate.body);
     const normSubj = normalizeReviewBody(candidate.subject);
@@ -865,8 +908,10 @@ export function generateReviewDataset(
     });
   }
 
-  // Global uniqueness guard: ensures 0 exact duplicate bodies across the entire CSV
+  // Global uniqueness & anti-repetition guards
   const globalUsedBodies = new Set<string>();
+  const globalSubjectCounts = new Map<string, number>();
+  const globalOpenerCounts = new Map<string, number>();
   const emailFrequency = new Map<string, number>();
   const output: GeneratedReview[] = [];
 
@@ -888,8 +933,9 @@ export function generateReviewDataset(
         Math.random() * 100 < config.returningCustomerRate;
 
       if (tryReturning) {
+        // Cap each returning customer to at most 3 reviews total so emails never look spammy/repeated
         const candidates = returningPool.filter(
-          (c) => !c.reviewedProductKeys.has(productKey)
+          (c) => !c.reviewedProductKeys.has(productKey) && c.reviewedProductKeys.size < 3
         );
         if (candidates.length > 0) {
           const customer = pickRandom(candidates);
@@ -924,7 +970,9 @@ export function generateReviewDataset(
         iptvMode,
         globalUsedBodies,
         productUsedSubjects,
-        serviceMode
+        serviceMode,
+        globalSubjectCounts,
+        globalOpenerCounts
       );
 
       emailFrequency.set(chosenEmail, (emailFrequency.get(chosenEmail) || 0) + 1);

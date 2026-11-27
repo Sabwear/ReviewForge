@@ -777,8 +777,9 @@ ${formatted}
 
 RULES:
 - Write in the EXACT language code specified (e.g. nl = natural Belgian/Dutch, fr = natural French, en = natural English, darija_latin = Moroccan Darija in Latin script).
-- Vary sentence length naturally (some short 1-sentence, some 2-3 sentences, casual human rhythm, zero AI buzzwords).
-- Keep 1-2 star reviews benign & realistic (minor scheduling wait, slight preference mismatch — never scam/fraud allegations).`;
+- Make every review sound genuinely human: vary lengths (some ultra-short 5–12 words, some 1–2 casual sentences, some 3 detailed sentences), use diverse titles, and include occasional natural human quirks (casual phrasing, minor phone typos like "reccomend"/"tres"/"rdv", occasional lowercase or missing final period in ~20% of reviews).
+- Match the EXACT offering/service (e.g. boiler repair mentions heating/hot water/pressure, leak repair mentions pipes/sink).
+- PRESERVE negative/mixed 1–3 star reviews honestly (minor scheduling wait, slight preference mismatch — never scam/fraud allegations).`;
 
   const { data, usage } = await generateJsonWithAI<{
     rewrites?: Array<{ id: string; subject: string; body: string }>;
