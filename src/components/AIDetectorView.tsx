@@ -99,7 +99,8 @@ interface AIDetectorViewProps {
   onExportVerifiedOnly: () => void;
 }
 
-type VerdictFilter = 'all' | 'ai_flagged' | 'generic' | 'human' | 'unchecked';
+type VerdictFilter = 'all' | 'ai_flagged' | 'generic' | 'human' | 'unchecked' | 'issues';
+type RowSortMode = 'flagged_first' | 'lowest_score' | 'newest' | 'default';
 
 const VERDICT_COLORS = {
   human: '#62C49C',
@@ -133,8 +134,24 @@ export function AIDetectorView({
   onExportVerifiedOnly,
 }: AIDetectorViewProps) {
   const [verdictFilter, setVerdictFilter] = useState<VerdictFilter>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [rowSort, setRowSort] = useState<RowSortMode>('flagged_first');
   const verifiedSet = useMemo(() => new Set(verifiedIds), [verifiedIds]);
   const integrity = useMemo(() => runDatasetIntegrityAudit(reviews), [reviews]);
+
+  const emailCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of reviews) {
+      const k = r.reviewer_email.trim().toLowerCase();
+      map.set(k, (map.get(k) || 0) + 1);
+    }
+    return map;
+  }, [reviews]);
+
+  const rowsWithIssuesCount = useMemo(
+    () => reviews.filter((r) => Boolean(integrity.issuesByReviewId[r.id]?.length)).length,
+    [reviews, integrity]
+  );
 
   const langMap = useMemo(() => {
     const m: Record<string, (typeof LANGUAGE_OPTIONS)[number]> = {};
@@ -259,13 +276,48 @@ export function AIDetectorView({
   }, [reviews, reviewAuditMap]);
 
   const filteredReviews = useMemo(() => {
-    return reviews.filter((r) => {
+    const q = searchQuery.trim().toLowerCase();
+    const list = reviews.filter((r) => {
       const a = reviewAuditMap[r.id];
-      if (verdictFilter === 'all') return true;
-      if (verdictFilter === 'unchecked') return !a;
-      return a?.verdict === verdictFilter;
+      const hasIssues = Boolean(integrity.issuesByReviewId[r.id]?.length);
+      if (verdictFilter === 'unchecked' && a) return false;
+      if (verdictFilter === 'issues' && !hasIssues) return false;
+      if (
+        verdictFilter !== 'all' &&
+        verdictFilter !== 'unchecked' &&
+        verdictFilter !== 'issues' &&
+        a?.verdict !== verdictFilter
+      ) {
+        return false;
+      }
+      if (!q) return true;
+      const haystack = `${r.item_name} ${r.category} ${r.reviewer_name} ${r.reviewer_email} ${r.subject} ${r.body} ${r.review_date} ${a?.reason || ''} ${(a?.signals || []).join(' ')}`.toLowerCase();
+      return haystack.includes(q);
     });
-  }, [reviews, reviewAuditMap, verdictFilter]);
+
+    const verdictRank = (v?: string) =>
+      v === 'ai_flagged' ? 0 : v === 'generic' ? 1 : v === 'human' ? 3 : 2;
+
+    if (rowSort === 'flagged_first') {
+      return [...list].sort((a, b) => {
+        const aIss = integrity.issuesByReviewId[a.id]?.length ? 0 : 1;
+        const bIss = integrity.issuesByReviewId[b.id]?.length ? 0 : 1;
+        const vr = verdictRank(reviewAuditMap[a.id]?.verdict) - verdictRank(reviewAuditMap[b.id]?.verdict);
+        if (vr !== 0) return vr;
+        if (aIss !== bIss) return aIss - bIss;
+        return (reviewAuditMap[a.id]?.humanScore ?? 100) - (reviewAuditMap[b.id]?.humanScore ?? 100);
+      });
+    }
+    if (rowSort === 'lowest_score') {
+      return [...list].sort(
+        (a, b) => (reviewAuditMap[a.id]?.humanScore ?? 101) - (reviewAuditMap[b.id]?.humanScore ?? 101)
+      );
+    }
+    if (rowSort === 'newest') {
+      return [...list].sort((a, b) => b.review_date.localeCompare(a.review_date));
+    }
+    return list;
+  }, [reviews, reviewAuditMap, verdictFilter, searchQuery, rowSort, integrity]);
 
   const hasSavedData = Object.keys(reviewAuditMap).length > 0 || auditRuns.length > 0;
   const nextScanBatch =
@@ -723,57 +775,91 @@ export function AIDetectorView({
             </section>
           )}
 
-          {/* Filterable Review Audit Inspector */}
+          {/* Filterable Review Audit Inspector — Shows ALL Rows with Full Forensic Details */}
           <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-1.5">
-                {(
-                  [
-                    { id: 'all', label: `All (${stats.total})` },
-                    { id: 'ai_flagged', label: `AI Flagged (${stats.aiFlagged})` },
-                    { id: 'generic', label: `Generic (${stats.generic})` },
-                    { id: 'human', label: `Human (${stats.human})` },
-                    { id: 'unchecked', label: `Unchecked (${stats.unchecked})` },
-                  ] as const
-                ).map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setVerdictFilter(tab.id)}
-                    className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-                      verdictFilter === tab.id
-                        ? 'bg-slate-900 text-white'
-                        : 'text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
+            <div className="px-5 py-3.5 border-b border-slate-200 bg-slate-50/70 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {(
+                    [
+                      { id: 'all', label: `All (${stats.total})` },
+                      { id: 'ai_flagged', label: `AI Flagged (${stats.aiFlagged})` },
+                      { id: 'generic', label: `Generic (${stats.generic})` },
+                      { id: 'issues', label: `Integrity Warnings (${rowsWithIssuesCount})` },
+                      { id: 'human', label: `Human (${stats.human})` },
+                      { id: 'unchecked', label: `Unchecked (${stats.unchecked})` },
+                    ] as const
+                  ).map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setVerdictFilter(tab.id)}
+                      className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                        verdictFilter === tab.id
+                          ? 'bg-slate-900 text-white'
+                          : 'text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+                <span className="text-xs text-slate-500 font-mono">
+                  Showing all {filteredReviews.length} of {reviews.length} rows
+                </span>
               </div>
-              <span className="text-xs text-slate-500 font-mono">
-                Showing {filteredReviews.length} rows
-              </span>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search reviewer, email, service, text, or flag reason…"
+                  className="flex-1 min-w-[220px] h-8 px-3 rounded-lg border border-slate-300 bg-white text-xs text-slate-800 placeholder:text-slate-400 focus:border-sky-600 focus:outline-none"
+                />
+                <select
+                  aria-label="Sort detector rows"
+                  value={rowSort}
+                  onChange={(e) => setRowSort(e.target.value as RowSortMode)}
+                  className="h-8 px-2.5 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 focus:border-sky-600 focus:outline-none cursor-pointer"
+                >
+                  <option value="flagged_first">Sort: Flagged First</option>
+                  <option value="lowest_score">Sort: Lowest Human Score</option>
+                  <option value="newest">Sort: Newest Date</option>
+                  <option value="default">Sort: Original Order</option>
+                </select>
+              </div>
             </div>
 
-            <div className="divide-y divide-slate-200 max-h-[560px] overflow-y-auto">
-              {filteredReviews.slice(0, 100).map((review) => {
+            <div className="divide-y divide-slate-200">
+              {filteredReviews.map((review, rowIdx) => {
                 const audit = reviewAuditMap[review.id];
                 const lang = langMap[review.language];
+                const emailKey = review.reviewer_email.trim().toLowerCase();
+                const emailCount = emailCountMap.get(emailKey) || 1;
+                const wordCount = review.body.trim().split(/\s+/).filter(Boolean).length;
+                const rowIssues = integrity.issuesByReviewId[review.id] || [];
                 return (
                   <div key={review.id} className="p-4 flex items-start justify-between gap-4 hover:bg-slate-50/70">
-                    <div className="min-w-0 flex-1 space-y-1">
+                    <div className="min-w-0 flex-1 space-y-1.5">
                       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                        <span className="font-mono text-[11px] text-slate-400">#{rowIdx + 1}</span>
                         <span className="inline-flex items-center gap-0.5 text-amber-600 font-mono font-semibold">
                           <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
                           {review.stars}.0
                         </span>
                         <span className="font-semibold text-slate-800">{review.item_name}</span>
+                        <span className="px-1.5 py-0.5 rounded bg-slate-100 text-[10px] font-medium text-slate-600">
+                          {review.category}
+                        </span>
                         {lang && (
                           <span className="inline-flex items-center gap-1">
                             <FlagBadge countryCode={lang.countryCode} emoji={lang.flag} size="sm" />
                             <span>{lang.label}</span>
                           </span>
                         )}
+                        <span className="font-mono text-[11px]">{review.review_date}</span>
+                        <span className="font-mono text-[11px] text-slate-400">{wordCount}w</span>
                         {audit ? (
                           <span
                             className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
@@ -793,6 +879,26 @@ export function AIDetectorView({
                         ) : (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-500">
                             Unchecked
+                          </span>
+                        )}
+                        {verifiedSet.has(review.id) && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            Verified
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Reviewer & Email Metadata Row */}
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                        <span className="font-medium text-slate-700">{review.reviewer_name}</span>
+                        <span className="font-mono text-slate-400">{review.reviewer_email}</span>
+                        {emailCount > 1 ? (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-50 text-sky-700 border border-sky-200">
+                            Repeat Reviewer ({emailCount}×)
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            Unique Email
                           </span>
                         )}
                       </div>
@@ -843,6 +949,20 @@ export function AIDetectorView({
                             </div>
                           )}
 
+                          {audit.flaggedPhrases && audit.flaggedPhrases.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                              <span className="font-semibold text-rose-700">Flagged phrases:</span>
+                              {audit.flaggedPhrases.map((phrase) => (
+                                <span
+                                  key={phrase}
+                                  className="px-1.5 py-0.5 rounded font-mono bg-rose-50 text-rose-700 border border-rose-200"
+                                >
+                                  “{phrase}”
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
                           {audit.signals && audit.signals.length > 0 && (
                             <div className="flex flex-wrap gap-1.5">
                               {audit.signals.map((sig) => (
@@ -862,16 +982,16 @@ export function AIDetectorView({
                             </div>
                           )}
 
-                          {audit.suggestion && audit.verdict !== 'human' && (
+                          {audit.suggestion && (
                             <div className="text-[11px] text-sky-700">
                               <span className="font-semibold">Tip:</span> {audit.suggestion}
                             </div>
                           )}
                         </div>
                       )}
-                      {integrity.issuesByReviewId[review.id]?.length > 0 && (
+                      {rowIssues.length > 0 && (
                         <div className="flex flex-wrap gap-1.5 pt-1">
-                          {integrity.issuesByReviewId[review.id].map((iss, idx) => (
+                          {rowIssues.map((iss, idx) => (
                             <span
                               key={idx}
                               className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200"
