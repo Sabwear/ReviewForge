@@ -20,6 +20,7 @@ const ALLOWED_LANGUAGES = new Set([
   'en', 'fr', 'es', 'de', 'it', 'pt', 'nl', 'ar', 'darija_latin',
   'tr', 'ru', 'zh', 'ja', 'ko', 'hi', 'pl',
 ]);
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
 const MAX_FETCH_BYTES = 1_200_000; // 1.2 MB cap per fetched page
 const FETCH_TIMEOUT_MS = 8_000;
 
@@ -191,7 +192,7 @@ async function safeFetchPublicUrl(
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       headers: {
         'User-Agent':
-          'Mozilla/5.0 (compatible; ReviewForgeCatalogScanner/1.0; +https://reviewforge.local)',
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         Accept: acceptHeader,
         'Accept-Language': 'en-US,en;q=0.9,fr;q=0.8,ar;q=0.7',
       },
@@ -398,7 +399,7 @@ async function tryFetchShopifyProducts(baseUrl: URL): Promise<ShopifyProductItem
 async function lookupWebsiteViaSearch(ai: GoogleGenAI, targetUrl: string): Promise<string> {
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-4-hydrogen',
+      model: GEMINI_MODEL,
       contents: `Inspect the business at ${targetUrl}. Summarize the business name, location/region, industry, and list the specific services, plans, or products this website offers (8 to 20 concrete offerings if available).`,
       config: {
         tools: [{ googleSearch: {} }],
@@ -721,7 +722,7 @@ CRITICAL INSTRUCTIONS:
 8. Placeholders: Use ONLY {product}, {contextA}, {contextB}, {duration}, {timeframe}. Do NOT invent other placeholders.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-4-hydrogen',
+      model: GEMINI_MODEL,
       contents: prompt,
       config: {
         systemInstruction:
@@ -893,7 +894,7 @@ CRITICAL INSTRUCTIONS:
 8. Placeholders: Use ONLY {product}, {contextA}, {contextB}, {duration}, {timeframe}. Do NOT invent other placeholders.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-4-hydrogen',
+      model: GEMINI_MODEL,
       contents: prompt,
       config: {
         systemInstruction:
