@@ -1202,23 +1202,41 @@ export function ConfigSidebar({
 
         {/* Date Window — Month-by-Month Slider + Radio Presets */}
         {(() => {
-          const endDate = config.dateEnd ? new Date(`${config.dateEnd}T00:00:00`) : new Date();
-          const startDate = config.dateStart ? new Date(`${config.dateStart}T00:00:00`) : new Date();
-          const approxMonths = Math.max(
-            1,
-            Math.min(
-              36,
-              Math.round((endDate.getTime() - startDate.getTime()) / (30.4375 * 86400000))
-            )
-          );
+          const toLocalYMD = (d: Date) => {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${y}-${m}-${day}`;
+          };
+          const parseYMD = (s: string | undefined): Date => {
+            if (s && /^\d{4}-\d{2}-\d{2}$/.test(s)) {
+              const [y, m, d] = s.split('-').map(Number);
+              return new Date(y, m - 1, d);
+            }
+            return new Date();
+          };
+          const subtractCalendarMonths = (anchor: Date, months: number): Date => {
+            const targetMonthIdx = anchor.getFullYear() * 12 + anchor.getMonth() - months;
+            const targetYear = Math.floor(targetMonthIdx / 12);
+            const targetMonth = ((targetMonthIdx % 12) + 12) % 12;
+            const lastDayOfTarget = new Date(targetYear, targetMonth + 1, 0).getDate();
+            return new Date(targetYear, targetMonth, Math.min(anchor.getDate(), lastDayOfTarget));
+          };
+
+          const endDate = parseYMD(config.dateEnd);
+          const startDate = parseYMD(config.dateStart);
+          const rawMonthDiff =
+            (endDate.getFullYear() - startDate.getFullYear()) * 12 +
+            (endDate.getMonth() - startDate.getMonth());
+          const approxMonths = Math.max(1, Math.min(36, rawMonthDiff || 1));
+
           const applyMonthsBack = (months: number) => {
-            const safeEnd = new Date();
-            const nextStart = new Date(safeEnd);
-            nextStart.setMonth(nextStart.getMonth() - months);
+            const safeEnd = config.dateEnd ? parseYMD(config.dateEnd) : new Date();
+            const nextStart = subtractCalendarMonths(safeEnd, months);
             onConfigChange({
               ...config,
-              dateStart: nextStart.toISOString().split('T')[0],
-              dateEnd: safeEnd.toISOString().split('T')[0],
+              dateStart: toLocalYMD(nextStart),
+              dateEnd: toLocalYMD(safeEnd),
             });
           };
           const formatMonthsLabel = (m: number) => {
@@ -1249,6 +1267,7 @@ export function ConfigSidebar({
                   max={36}
                   step={1}
                   value={approxMonths}
+                  onInput={(e) => applyMonthsBack(Number((e.target as HTMLInputElement).value))}
                   onChange={(e) => applyMonthsBack(Number(e.target.value))}
                   className="w-full accent-sky-700 cursor-pointer"
                 />
@@ -1299,10 +1318,20 @@ export function ConfigSidebar({
                   <input
                     id="date-start"
                     type="date"
+                    max={config.dateEnd || undefined}
                     value={config.dateStart}
-                    onChange={(e) =>
-                      onConfigChange({ ...config, dateStart: e.target.value })
-                    }
+                    onChange={(e) => {
+                      const nextStart = e.target.value;
+                      if (!nextStart) return;
+                      onConfigChange({
+                        ...config,
+                        dateStart: nextStart,
+                        dateEnd:
+                          config.dateEnd && nextStart > config.dateEnd
+                            ? nextStart
+                            : config.dateEnd,
+                      });
+                    }}
                     className="w-full h-10 px-2.5 rounded-lg border border-slate-300 bg-white font-mono text-xs text-slate-900 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/20"
                   />
                 </div>
@@ -1316,10 +1345,20 @@ export function ConfigSidebar({
                   <input
                     id="date-end"
                     type="date"
+                    min={config.dateStart || undefined}
                     value={config.dateEnd}
-                    onChange={(e) =>
-                      onConfigChange({ ...config, dateEnd: e.target.value })
-                    }
+                    onChange={(e) => {
+                      const nextEnd = e.target.value;
+                      if (!nextEnd) return;
+                      onConfigChange({
+                        ...config,
+                        dateEnd: nextEnd,
+                        dateStart:
+                          config.dateStart && config.dateStart > nextEnd
+                            ? nextEnd
+                            : config.dateStart,
+                      });
+                    }}
                     className="w-full h-10 px-2.5 rounded-lg border border-slate-300 bg-white font-mono text-xs text-slate-900 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/20"
                   />
                 </div>
