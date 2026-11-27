@@ -1159,7 +1159,7 @@ CRITICAL INSTRUCTIONS:
     res.json({
       businessProfile: buildBusinessProfile(rawPages, {
         name: detectedName,
-        summary: detectedSummary,
+        summary: parsed?.businessSummary,
       }),
       scannedUrl: homeResult.finalUrl.toString(),
       hostname: homeResult.finalUrl.hostname,

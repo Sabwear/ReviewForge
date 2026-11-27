@@ -19,10 +19,10 @@ const SIGNAL_PATH =
   /\/(services?|solutions?|offerings?|pricing|plans?|packages?|treatments?|menu|products?|collections?|shop|store|catalog|features?|programs?|courses?|prestations?|produits?|tarifs?|soins?|diensten|interventions?|depannage|reparations?)\//i;
 
 const JUNK_PATH =
-  /\/(legal|customers?|glossary|terms|privacy|careers?|jobs|press|blog|news|support|help|docs|contact|about|over-ons|a-propos|login|signin|signup|cart|account|service-areas?|areas?|locations?|cities|werkgebied|zones?|regio|steden|faq|reviews?|testimonials?|partners?|author|tag|category)(\/|$)/i;
+  /\/(legal|customers?|glossary|terms|privacy|careers?|jobs|press|blog|news|support|help|docs|contact|about|over-ons|a-propos|login|signin|signup|cart|account|service-areas?|areas?|locations?|cities|werkgebied|zones?|regio|steden|faq|reviews?|testimonials?|partners?|author|tag|category|videos?|downloads?|financing|brochures?|manuals?|gallery|resources?)(\/|$)/i;
 
 const JUNK_NAME =
-  /^(home|about( us)?|contact( us)?|blog|news|faq|login|log in|sign ?up|register|cart|checkout|privacy|terms|policy|search|menu|skip to content|read more|learn more|get started|book now|view all|shop all|services?|our services|all services|service areas?|areas? we serve|locations?|solutions?|our solutions|products?|our products|pricing|plans?|about .+|why choose us|how it works|testimonials?|reviews?|contact|get a quote|request a quote|free quote|call now|whatsapp)$/i;
+  /^(home|about( us)?|contact( us)?|blog|news|faq|faqs|login|log in|sign ?up|register|cart|checkout|privacy|terms|policy|search|menu|skip to content|read more|learn more|get started|book now|view all|shop all|services?|our services|all services|service areas?|areas? we serve|locations?|solutions?|our solutions|products?|our products|pricing|plans?|about .+|why choose us|how it works|testimonials?|reviews?|customer reviews?|client reviews?|videos?|downloads?|brochures?|manuals?|financing.*|payment plans?|contact|get a quote|request a quote|free quote|call now|whatsapp|gallery|resources?)$/i;
 
 const MARKETING_SLOGAN_START =
   /^(your |about |why |how |what |who |where |clear |advice |trusted |authorized |certified |welcome |discover |meet |get |find |need |looking for |serving |available )/i;

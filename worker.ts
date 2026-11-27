@@ -359,7 +359,7 @@ CRITICAL RULES:
     return json({
       businessProfile: buildBusinessProfile(rawPages, {
         name: detectedName,
-        summary: detectedSummary,
+        summary: parsed?.businessSummary,
       }),
       scannedUrl: home.finalUrl.toString(),
       hostname: home.finalUrl.hostname,
