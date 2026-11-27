@@ -29,6 +29,7 @@ import {
   businessNameFrom,
   type ScrapedItem,
 } from './scraper.ts';
+import { buildBusinessProfile } from './business-profile.ts';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -942,10 +943,12 @@ app.post('/api/scan-website', async (req, res) => {
     const finalOrigin = homeResult.finalUrl.origin;
     const scannedPages: ExtractedPageSignals[] = [];
     const jsonLdItems: ScrapedItem[] = [];
+    const rawPages: { url: string; html: string }[] = [];
 
     if (homeResult.status >= 200 && homeResult.status < 400 && homeResult.text) {
       const homeSignals = extractHtmlSignals(homeResult.text, homeResult.finalUrl);
       scannedPages.push(homeSignals);
+      rawPages.push({ url: homeResult.finalUrl.toString(), html: homeResult.text });
       jsonLdItems.push(...extractJsonLdItems(homeResult.text, homeResult.finalUrl));
 
       // 2. If not already a full Shopify catalog, fetch up to 3 high-signal subpages (services, pricing, menu, shop)
@@ -962,6 +965,7 @@ app.post('/api/scan-website', async (req, res) => {
             r.value.text
           ) {
             scannedPages.push(extractHtmlSignals(r.value.text, r.value.finalUrl));
+            rawPages.push({ url: r.value.finalUrl.toString(), html: r.value.text });
             jsonLdItems.push(...extractJsonLdItems(r.value.text, r.value.finalUrl));
           }
         }
@@ -1141,8 +1145,22 @@ CRITICAL INSTRUCTIONS:
     const detectedFormat = shopifyProducts.length > 0 ? 'shopify' : 'website';
     const isEcommerce =
       shopifyProducts.length > 0 || wooItems.length > 0 || parsed?.businessType?.toLowerCase() === 'ecommerce';
+    const detectedName =
+      parsed?.detectedBusinessName || businessNameFrom(scannedPages[0] || { ogSiteName: '', title: '' }, homeResult.finalUrl.hostname);
+    const metaDesc = scannedPages[0]?.metaDescription?.trim() || '';
+    const uniqueCats = Array.from(new Set(finalProducts.map((p) => p.category))).slice(0, 4);
+    const sampleOfferings = finalProducts.slice(0, 4).map((p) => p.item_name);
+    const detectedSummary =
+      parsed?.businessSummary?.trim() ||
+      (metaDesc
+        ? `${detectedName} (${isEcommerce ? 'E-commerce' : 'Service business'}) — ${metaDesc.slice(0, 220)}`
+        : `${detectedName} — ${isEcommerce ? 'Online store' : 'Service business'} offering ${uniqueCats.join(', ')} (${sampleOfferings.join(', ')}).`);
 
     res.json({
+      businessProfile: buildBusinessProfile(rawPages, {
+        name: detectedName,
+        summary: detectedSummary,
+      }),
       scannedUrl: homeResult.finalUrl.toString(),
       hostname: homeResult.finalUrl.hostname,
       scannedPagesCount: Math.max(1, scannedPages.length),
@@ -1155,7 +1173,8 @@ CRITICAL INSTRUCTIONS:
       products: finalProducts,
       aiUsed: Boolean(parsed),
       aiUsage,
-      detectedBusinessName: parsed?.detectedBusinessName || businessNameFrom(scannedPages[0] || { ogSiteName: '', title: '' }, homeResult.finalUrl.hostname),
+      detectedBusinessName: detectedName,
+      detectedBusinessSummary: detectedSummary,
       pack: parsed
         ? {
             detectedBusinessName: parsed.detectedBusinessName,

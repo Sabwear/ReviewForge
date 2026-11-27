@@ -30,6 +30,7 @@ import {
   tryWooCommerce,
   type ScrapedItem,
 } from './scraper.ts';
+import { buildBusinessProfile } from './business-profile.ts';
 
 interface Env extends ServerAIEnv {
   ASSETS: { fetch(req: Request): Promise<Response> };
@@ -221,16 +222,19 @@ async function scanWebsite(req: Request, env: Env): Promise<Response> {
     const origin = home.finalUrl.origin;
     const pages: ExtractedPageSignals[] = [];
     const ld: ScrapedItem[] = [];
+    const rawPages: { url: string; html: string }[] = [];
 
     if (home.status >= 200 && home.status < 400 && home.text) {
       const sig = extractHtmlSignals(home.text, home.finalUrl);
       pages.push(sig);
+      rawPages.push({ url: home.finalUrl.toString(), html: home.text });
       ld.push(...extractJsonLdItems(home.text, home.finalUrl));
       if (shopify.length === 0) {
         const subs = await Promise.allSettled(sig.navAndServiceLinks.slice(0, 5).map((l) => safeFetchPublicUrl(l.url)));
         for (const r of subs) {
           if (r.status === 'fulfilled' && r.value.status >= 200 && r.value.status < 400 && r.value.text) {
             pages.push(extractHtmlSignals(r.value.text, r.value.finalUrl));
+            rawPages.push({ url: r.value.finalUrl.toString(), html: r.value.text });
             ld.push(...extractJsonLdItems(r.value.text, r.value.finalUrl));
           }
         }
@@ -341,7 +345,22 @@ CRITICAL RULES:
     }
 
     const isEcommerce = shopify.length > 0 || woo.length > 0 || parsed?.businessType?.toLowerCase() === 'ecommerce';
+    const detectedName =
+      parsed?.detectedBusinessName || businessNameFrom(pages[0] || { ogSiteName: '', title: '' }, home.finalUrl.hostname);
+    const metaDesc = pages[0]?.metaDescription?.trim() || '';
+    const uniqueCats = Array.from(new Set(products.map((p) => p.category))).slice(0, 4);
+    const sampleOfferings = products.slice(0, 4).map((p) => p.item_name);
+    const detectedSummary =
+      parsed?.businessSummary?.trim() ||
+      (metaDesc
+        ? `${detectedName} (${isEcommerce ? 'E-commerce' : 'Service business'}) — ${metaDesc.slice(0, 220)}`
+        : `${detectedName} — ${isEcommerce ? 'Online store' : 'Service business'} offering ${uniqueCats.join(', ')} (${sampleOfferings.join(', ')}).`);
+
     return json({
+      businessProfile: buildBusinessProfile(rawPages, {
+        name: detectedName,
+        summary: detectedSummary,
+      }),
       scannedUrl: home.finalUrl.toString(),
       hostname: home.finalUrl.hostname,
       scannedPagesCount: Math.max(1, pages.length),
@@ -350,8 +369,8 @@ CRITICAL RULES:
       detectedStoreBaseUrl: shopify.length > 0 ? `${origin}/products` : origin,
       aiUsed: Boolean(parsed),
       aiUsage,
-      detectedBusinessName:
-        parsed?.detectedBusinessName || businessNameFrom(pages[0] || { ogSiteName: '', title: '' }, home.finalUrl.hostname),
+      detectedBusinessName: detectedName,
+      detectedBusinessSummary: detectedSummary,
       products,
       pack: parsed?.languagePacks
         ? {

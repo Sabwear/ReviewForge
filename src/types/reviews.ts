@@ -77,15 +77,34 @@ export const EXPORT_FORMAT_OPTIONS: ExportFormatOption[] = [
   },
 ];
 
+export interface BusinessProfile {
+  name: string;
+  summary: string;
+  summarySource: 'ai' | 'website';
+  logoUrl: string;
+  phones: string[];
+  emails: string[];
+  address: string;
+  openingHours: string[];
+  priceRange: string;
+  areasServed: string[];
+  socialLinks: { label: string; url: string }[];
+  siteLanguage: string;
+  publishedRating: { value: number; count: number | null; best: number } | null;
+}
+
 export interface WebsiteScanResponse {
+  businessProfile?: BusinessProfile;
   scannedUrl: string;
   hostname: string;
   scannedPagesCount: number;
   businessType: 'ecommerce' | 'service';
   detectedFormat: CatalogFormat;
   detectedStoreBaseUrl: string;
+  detectedBusinessName?: string;
+  detectedBusinessSummary?: string;
   products: CatalogProduct[];
-  pack: BusinessVoicePack;
+  pack: BusinessVoicePack | null;
 }
 
 export type ReviewerVoice = 'minimalist' | 'casual' | 'sports' | 'family' | 'technical';

@@ -56,6 +56,7 @@ interface ConfigSidebarProps {
   onLoadSampleBusiness: (id: SampleBusinessId) => void;
   onClearWorkspace: () => void;
   onGenerate: () => void;
+  lastUsedLanguages: ReviewLanguage[] | null;
 }
 
 const FORMAT_LABELS: Record<CatalogFormat, string> = {
@@ -91,6 +92,7 @@ export function ConfigSidebar({
   onLoadSampleBusiness,
   onClearWorkspace,
   onGenerate,
+  lastUsedLanguages,
 }: ConfigSidebarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [sourceMode, setSourceMode] = useState<'website' | 'csv'>('website');
@@ -815,25 +817,37 @@ export function ConfigSidebar({
           Mix any of {LANGUAGE_OPTIONS.length} global languages with native idioms, regional names, and Darija (Latin).
         </p>
 
-        <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg mb-2">
+        <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-100 rounded-lg mb-2">
           <button
             type="button"
             onClick={selectGlobalTop5}
             className="flex-1 px-2 py-1.5 text-[11px] font-medium text-slate-700 hover:text-slate-900 hover:bg-white rounded-md transition-colors whitespace-nowrap cursor-pointer"
           >
-            Top 5 Global
+            Top 5 Lang
           </button>
+          {lastUsedLanguages && lastUsedLanguages.length > 0 && (
+            <button
+              type="button"
+              onClick={() =>
+                onConfigChange({ ...config, selectedLanguages: lastUsedLanguages })
+              }
+              title={`Restore last used: ${lastUsedLanguages.join(', ')}`}
+              className="flex-1 px-2 py-1.5 text-[11px] font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 rounded-md transition-colors whitespace-nowrap cursor-pointer"
+            >
+              Last Used ({lastUsedLanguages.length})
+            </button>
+          )}
           <button
             type="button"
             onClick={selectMaghrebMix}
-            className="flex-1 px-2 py-1.5 text-[11px] font-medium text-slate-700 hover:text-slate-900 hover:bg-white rounded-md transition-colors whitespace-nowrap cursor-pointer"
+            className="px-2 py-1.5 text-[11px] font-medium text-slate-700 hover:text-slate-900 hover:bg-white rounded-md transition-colors whitespace-nowrap cursor-pointer"
           >
-            EN/FR/Darija/AR
+            EN/FR/AR
           </button>
           <button
             type="button"
             onClick={selectAllLanguages}
-            className="px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:text-slate-900 hover:bg-white rounded-md transition-colors whitespace-nowrap cursor-pointer"
+            className="px-2 py-1.5 text-[11px] font-medium text-slate-700 hover:text-slate-900 hover:bg-white rounded-md transition-colors whitespace-nowrap cursor-pointer"
           >
             All {LANGUAGE_OPTIONS.length}
           </button>

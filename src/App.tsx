@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BusinessProfileCard } from './components/BusinessProfileCard';
 import { AIDetectorView, AuditRunSummary, ReviewAuditEntry } from './components/AIDetectorView';
 import { ConfigSidebar } from './components/ConfigSidebar';
 import { DashboardView } from './components/DashboardView';
@@ -58,20 +59,21 @@ function loadSavedVerifiedIds(): string[] {
 
 const VALID_LANGUAGE_CODES = new Set<string>(LANGUAGE_OPTIONS.map((l) => l.code));
 
-function loadSavedLanguages(): ReviewLanguage[] {
-  const fallback: ReviewLanguage[] = ['en', 'fr', 'darija_latin', 'ar'];
-  if (typeof window === 'undefined') return fallback;
+const TOP_5_LANGUAGES: ReviewLanguage[] = ['en', 'fr', 'es', 'de', 'ar'];
+
+function loadSavedLanguages(): ReviewLanguage[] | null {
+  if (typeof window === 'undefined') return null;
   try {
     const raw = window.localStorage.getItem(SAVED_LANGUAGES_KEY);
-    if (!raw) return fallback;
+    if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return fallback;
+    if (!Array.isArray(parsed)) return null;
     const valid = parsed.filter(
       (code): code is ReviewLanguage => typeof code === 'string' && VALID_LANGUAGE_CODES.has(code)
     );
-    return valid.length > 0 ? valid : fallback;
+    return valid.length > 0 ? valid : null;
   } catch {
-    return fallback;
+    return null;
   }
 }
 
@@ -142,7 +144,7 @@ export default function App() {
   const initialConfig: GeneratorConfig = useMemo(
     () => ({
       selectedCategories: [],
-      selectedLanguages: loadSavedLanguages(),
+      selectedLanguages: TOP_5_LANGUAGES,
       excludeByKeywords: false,
       excludeKeywords: 'test, trial, sample',
       exportFormat: 'judge_me',
@@ -171,6 +173,7 @@ export default function App() {
   const [websiteUrl, setWebsiteUrl] = useState<string>('');
   const [isScanningWebsite, setIsScanningWebsite] = useState<boolean>(false);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [scanResult, setScanResult] = useState<WebsiteScanResponse | null>(null);
 
   const [businessContext, setBusinessContext] = useState<string>('');
   const [adaptedPack, setAdaptedPack] = useState<BusinessVoicePack | null>(null);
@@ -186,7 +189,18 @@ export default function App() {
   const [isRewritingReviews, setIsRewritingReviews] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
 
+  const [lastUsedLanguages, setLastUsedLanguages] = useState<ReviewLanguage[] | null>(
+    loadSavedLanguages
+  );
+  const hasInteractedLanguagesRef = useRef(false);
+
   useEffect(() => {
+    if (!hasInteractedLanguagesRef.current) {
+      hasInteractedLanguagesRef.current = true;
+      return;
+    }
+    if (config.selectedLanguages.length === 0) return;
+    setLastUsedLanguages(config.selectedLanguages);
     try {
       window.localStorage.setItem(SAVED_LANGUAGES_KEY, JSON.stringify(config.selectedLanguages));
     } catch {
@@ -253,6 +267,7 @@ export default function App() {
       setScanError(null);
       setParseError(null);
       setAdaptError(null);
+      setScanResult(null);
 
       try {
         const response = await fetch('/api/scan-website', {
@@ -300,11 +315,22 @@ export default function App() {
           storeBaseUrl: payload.detectedStoreBaseUrl || '',
         };
 
+        setScanResult(payload as WebsiteScanResponse);
+        const autoBusinessSummary =
+          scannedPack?.businessSummary?.trim() ||
+          payload.detectedBusinessSummary?.trim() ||
+          `${payload.detectedBusinessName || payload.hostname || trimmed} — ${
+            payload.businessType === 'ecommerce' ? 'Online store' : 'Service business'
+          } offering ${scannedCategories.slice(0, 4).join(', ')} (${scannedProducts
+            .slice(0, 4)
+            .map((p) => p.item_name)
+            .join(', ')}).`;
+
         setActiveSampleId(null);
         setProducts(scannedProducts);
         setDetectedFormat(nextFormat);
-        setSourceLabel(payload.hostname || trimmed);
-        setBusinessContext(scannedPack?.businessSummary || '');
+        setSourceLabel(payload.detectedBusinessName || payload.hostname || trimmed);
+        setBusinessContext(autoBusinessSummary);
         setAdaptedPack(scannedPack);
         setConfig(nextConfig);
         setReviews(
@@ -450,6 +476,7 @@ export default function App() {
     setAdaptError(null);
     setAdaptedPack(null);
     setActiveSampleId(null);
+    setScanResult(null);
     setWebsiteUrl('');
     setSourceLabel('');
     setBusinessContext('');
@@ -478,6 +505,7 @@ export default function App() {
       setAdaptError(null);
       setAdaptedPack(null);
       setActiveSampleId(null);
+      setScanResult(null);
       setProducts(result.products);
       setSourceLabel(label);
       setDetectedFormat(result.detectedFormat);
@@ -554,6 +582,7 @@ export default function App() {
       setAdaptError(null);
       setAdaptedPack(null);
       setActiveSampleId(preset.id);
+      setScanResult(null);
       setProducts(preset.products);
       setSourceLabel(preset.sourceLabel);
       setDetectedFormat(preset.id === 'services' ? 'website' : 'standard');
@@ -946,9 +975,20 @@ export default function App() {
           onLoadSampleBusiness={handleLoadSampleBusiness}
           onClearWorkspace={handleClearWorkspace}
           onGenerate={handleGenerate}
+          lastUsedLanguages={lastUsedLanguages}
         />
 
         <main className="flex-1 min-w-0 flex flex-col">
+          {activeTab === 'workbench' && scanResult && (
+            <div className="px-6 lg:px-8 pt-6 lg:pt-8">
+              <BusinessProfileCard
+                key={scanResult.scannedUrl}
+                scan={scanResult}
+                onDismiss={() => setScanResult(null)}
+              />
+            </div>
+          )}
+
           {activeTab === 'workbench' && (
             <WorkbenchView
               totalProductsCount={products.length}
