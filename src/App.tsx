@@ -137,14 +137,14 @@ export default function App() {
 
         if (reqId !== requestIdRef.current) return;
 
-        if (!response.ok || !payload.products || !payload.pack) {
+        if (!response.ok || !payload.products) {
           throw new Error(
             payload.error || `Website scan failed (HTTP ${response.status}).`
           );
         }
 
         const scannedProducts = payload.products;
-        const scannedPack = payload.pack;
+        const scannedPack = (payload.pack ?? null) as BusinessVoicePack | null;
         const scannedCategories = Array.from(new Set(scannedProducts.map((p) => p.category)));
         const nextFormat: CatalogFormat = payload.detectedFormat || 'website';
         const nextExportFormat =
@@ -164,7 +164,7 @@ export default function App() {
         setProducts(scannedProducts);
         setDetectedFormat(nextFormat);
         setSourceLabel(payload.hostname || trimmed);
-        setBusinessContext(scannedPack.businessSummary || '');
+        setBusinessContext(scannedPack?.businessSummary || '');
         setAdaptedPack(scannedPack);
         setConfig(nextConfig);
         setReviews(

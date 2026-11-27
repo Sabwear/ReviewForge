@@ -5,6 +5,15 @@ import fs from 'fs';
 import net from 'net';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import {
+  tryWooCommerce,
+  extractJsonLdItems,
+  extractSitemapItems,
+  itemsFromLinksAndHeadings,
+  mergeItems,
+  businessNameFrom,
+  type ScrapedItem,
+} from './scraper.ts';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -770,7 +779,12 @@ app.post('/api/scan-website', async (req, res) => {
         : '';
 
     const validatedUrl = await parseAndValidatePublicUrl(rawUrl);
-    const ai = getGeminiClient();
+    let ai: GoogleGenAI | null = null;
+    try {
+      ai = getGeminiClient();
+    } catch {
+      console.warn('[scan-website] No GEMINI_API_KEY: running keyless scraper mode.');
+    }
 
     // 1. In parallel: fetch homepage HTML + probe Shopify /products.json
     const [homeResult, shopifyProducts] = await Promise.all([
@@ -786,14 +800,16 @@ app.post('/api/scan-website', async (req, res) => {
 
     const finalOrigin = homeResult.finalUrl.origin;
     const scannedPages: ExtractedPageSignals[] = [];
+    const jsonLdItems: ScrapedItem[] = [];
 
     if (homeResult.status >= 200 && homeResult.status < 400 && homeResult.text) {
       const homeSignals = extractHtmlSignals(homeResult.text, homeResult.finalUrl);
       scannedPages.push(homeSignals);
+      jsonLdItems.push(...extractJsonLdItems(homeResult.text, homeResult.finalUrl));
 
       // 2. If not already a full Shopify catalog, fetch up to 3 high-signal subpages (services, pricing, menu, shop)
       if (shopifyProducts.length === 0 && homeSignals.navAndServiceLinks.length > 0) {
-        const subLinks = homeSignals.navAndServiceLinks.slice(0, 3);
+        const subLinks = homeSignals.navAndServiceLinks.slice(0, ai ? 3 : 6);
         const subResults = await Promise.allSettled(
           subLinks.map((link) => safeFetchPublicUrl(link.url))
         );
@@ -805,10 +821,26 @@ app.post('/api/scan-website', async (req, res) => {
             r.value.text
           ) {
             scannedPages.push(extractHtmlSignals(r.value.text, r.value.finalUrl));
+            jsonLdItems.push(...extractJsonLdItems(r.value.text, r.value.finalUrl));
           }
         }
       }
     }
+
+    // Keyless extraction (WooCommerce API, JSON-LD, sitemap, links, headings)
+    const [wooItems, sitemapItems] =
+      shopifyProducts.length > 0
+        ? [[], []]
+        : await Promise.all([
+            tryWooCommerce(finalOrigin, safeFetchPublicUrl),
+            extractSitemapItems(finalOrigin, safeFetchPublicUrl),
+          ]);
+    const heuristicItems = mergeItems([
+      wooItems,
+      jsonLdItems,
+      sitemapItems,
+      itemsFromLinksAndHeadings(scannedPages),
+    ]);
 
     // Check how much real content we extracted; if site blocked fetch (Cloudflare/403) or is an empty SPA, run Search Grounding fallback
     const totalExtractedChars = scannedPages.reduce(
@@ -817,7 +849,7 @@ app.post('/api/scan-website', async (req, res) => {
     );
 
     let searchFallbackSummary = '';
-    if (shopifyProducts.length === 0 && totalExtractedChars < 300) {
+    if (ai && shopifyProducts.length === 0 && totalExtractedChars < 300 && heuristicItems.length === 0) {
       searchFallbackSummary = await lookupWebsiteViaSearch(ai, validatedUrl.toString());
       if (!searchFallbackSummary && scannedPages.length === 0) {
         res.status(502).json({
@@ -893,6 +925,9 @@ CRITICAL INSTRUCTIONS:
 7. STRICT LOW-STAR SAFETY GUARDRAIL (1-star & 2-star): NEVER accuse the business of being a scam, fraud, fake, dishonest, or taking money without delivering. Low-star reviews must ONLY describe benign, realistic friction (e.g., minor scheduling wait, slight preference mismatch, needed one extra revision, wishing for more availability/options, or minor learning curve).
 8. Placeholders: Use ONLY {product}, {contextA}, {contextB}, {duration}, {timeframe}. Do NOT invent other placeholders.`;
 
+    let parsed: ParsedScan | null = null;
+    if (ai) {
+      try {
     const response = await ai.models.generateContent({
       model: GEMINI_MODEL,
       contents: prompt,
@@ -906,12 +941,13 @@ CRITICAL INSTRUCTIONS:
     });
 
     const rawJson = (response.text ?? '').trim();
-    if (!rawJson) {
-      res.status(502).json({ error: 'Model returned an empty response. Please try again.' });
-      return;
+    if (!rawJson) throw new Error('Model returned an empty response.');
+    parsed = JSON.parse(rawJson) as ParsedScan;
+      } catch (aiErr) {
+        console.warn('[scan-website] AI step failed, using keyless results:', aiErr instanceof Error ? aiErr.message : aiErr);
+      }
     }
-
-    const parsed = JSON.parse(rawJson) as {
+    type _Unused = {
       businessType?: string;
       discoveredItems?: Array<{
         item_name: string;
@@ -929,10 +965,11 @@ CRITICAL INSTRUCTIONS:
       categoryContext?: unknown[];
       languagePacks: unknown[];
     };
+    void (0 as unknown as _Unused);
 
     // Build final catalog items: prefer exact Shopify IDs/URLs when found, otherwise use AI-discovered real services/products
     const classMap = new Map(
-      (parsed.productClassifications || []).map((c) => [c.item_slug.toLowerCase(), c])
+      (parsed?.productClassifications || []).map((c) => [c.item_slug.toLowerCase(), c])
     );
 
     const finalProducts =
@@ -947,7 +984,7 @@ CRITICAL INSTRUCTIONS:
               product_url: sp.product_url,
             };
           })
-        : (parsed.discoveredItems || []).slice(0, 30).map((item, idx) => {
+        : (parsed?.discoveredItems?.length ? parsed.discoveredItems : heuristicItems).slice(0, 30).map((item, idx) => {
             const slug = slugifySafe(item.item_slug || item.item_name, idx + 1);
             return {
               item_id: String(idx + 1),
@@ -967,7 +1004,7 @@ CRITICAL INSTRUCTIONS:
 
     const detectedFormat = shopifyProducts.length > 0 ? 'shopify' : 'website';
     const isEcommerce =
-      shopifyProducts.length > 0 || parsed.businessType?.toLowerCase() === 'ecommerce';
+      shopifyProducts.length > 0 || wooItems.length > 0 || parsed?.businessType?.toLowerCase() === 'ecommerce';
 
     res.json({
       scannedUrl: homeResult.finalUrl.toString(),
@@ -980,13 +1017,17 @@ CRITICAL INSTRUCTIONS:
           ? `${finalOrigin}/products`
           : finalOrigin,
       products: finalProducts,
-      pack: {
-        detectedBusinessName: parsed.detectedBusinessName,
-        businessSummary: parsed.businessSummary,
-        productClassifications: parsed.productClassifications,
-        categoryContext: parsed.categoryContext,
-        languagePacks: parsed.languagePacks,
-      },
+      aiUsed: Boolean(parsed),
+      detectedBusinessName: parsed?.detectedBusinessName || businessNameFrom(scannedPages[0] || { ogSiteName: '', title: '' }, homeResult.finalUrl.hostname),
+      pack: parsed
+        ? {
+            detectedBusinessName: parsed.detectedBusinessName,
+            businessSummary: parsed.businessSummary,
+            productClassifications: parsed.productClassifications,
+            categoryContext: parsed.categoryContext,
+            languagePacks: parsed.languagePacks,
+          }
+        : null,
     });
   } catch (err: unknown) {
     const message =
@@ -999,6 +1040,16 @@ CRITICAL INSTRUCTIONS:
     res.status(isValidationError ? 400 : 500).json({ error: message });
   }
 });
+
+interface ParsedScan {
+  businessType?: string;
+  discoveredItems?: Array<{ item_name: string; item_slug: string; category: string; product_url?: string }>;
+  detectedBusinessName: string;
+  businessSummary: string;
+  productClassifications?: Array<{ item_slug: string; cleanName: string; category: string }>;
+  categoryContext?: unknown[];
+  languagePacks: unknown[];
+}
 
 async function startServer() {
   if (!IS_PROD) {
