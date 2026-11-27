@@ -7,6 +7,7 @@ import {
   AIUsageRecord,
   DetectedModel,
 } from '../types/ai';
+import { rankModelsForApp } from '../utils/modelAdvisor';
 
 const SETTINGS_KEY = 'reviewforge-ai-settings-v1';
 const USAGE_KEY = 'reviewforge-ai-usage-v1';
@@ -118,11 +119,12 @@ export function useAISettings() {
                   const id = (m.name || m.model)!;
                   return { id, name: id, provider: 'ollama', isFree: true };
                 });
-              setDetectedModels(models);
-              if (models.length > 0 && !models.some((m) => m.id === cfg.model)) {
-                setSettingsState((prev) => ({ ...prev, model: models[0].id }));
+              const ranked = rankModelsForApp(models);
+              setDetectedModels(ranked);
+              if (ranked.length > 0 && !ranked.some((m) => m.id === cfg.model)) {
+                setSettingsState((prev) => ({ ...prev, model: ranked[0].id }));
               }
-              return models;
+              return ranked;
             }
           } catch {
             // Fall through to backend proxy (works in local dev)
@@ -149,11 +151,12 @@ export function useAISettings() {
         if (!res.ok || !Array.isArray(payload.models)) {
           throw new Error(payload.error || `Failed to fetch models (HTTP ${res.status}).`);
         }
-        setDetectedModels(payload.models);
-        if (payload.models.length > 0 && !payload.models.some((m) => m.id === cfg.model)) {
-          setSettingsState((prev) => ({ ...prev, model: payload.models![0].id }));
+        const ranked = rankModelsForApp(payload.models);
+        setDetectedModels(ranked);
+        if (ranked.length > 0 && !ranked.some((m) => m.id === cfg.model)) {
+          setSettingsState((prev) => ({ ...prev, model: ranked[0].id }));
         }
-        return payload.models;
+        return ranked;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to detect models.';
         setModelsError(message);

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   Activity,
+  Award,
   CheckCircle2,
   Cpu,
   Eye,
@@ -23,6 +24,11 @@ import {
   AIUsageRecord,
   DetectedModel,
 } from '../types/ai';
+import {
+  evaluateModelFit,
+  PROVIDER_GUIDES,
+  rankModelsForApp,
+} from '../utils/modelAdvisor';
 
 interface AISettingsModalProps {
   isOpen: boolean;
@@ -67,13 +73,33 @@ export function AISettingsModal({
     [settings.provider]
   );
 
+  const rankedModels = useMemo(() => rankModelsForApp(detectedModels), [detectedModels]);
+  const bestDetectedModel = rankedModels[0] ?? null;
+  const providerGuide = PROVIDER_GUIDES[settings.provider];
+
+  const selectedModelFit = useMemo(() => {
+    const id = settings.model.trim();
+    if (!id) return null;
+    const match = rankedModels.find((m) => m.id === id);
+    if (match) return match.fit;
+    return evaluateModelFit({
+      id,
+      name: id,
+      provider: settings.provider === 'fallback' ? 'gemini' : settings.provider,
+    });
+  }, [settings.model, settings.provider, rankedModels]);
+
   const filteredModels = useMemo(() => {
     const q = modelSearch.trim().toLowerCase();
-    if (!q) return detectedModels;
-    return detectedModels.filter(
-      (m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)
+    if (!q) return rankedModels;
+    return rankedModels.filter(
+      (m) =>
+        m.id.toLowerCase().includes(q) ||
+        m.name.toLowerCase().includes(q) ||
+        m.fit.tierLabel.toLowerCase().includes(q) ||
+        m.fit.tags.some((t) => t.toLowerCase().includes(q))
     );
-  }, [detectedModels, modelSearch]);
+  }, [rankedModels, modelSearch]);
 
   const usageStats = useMemo(() => {
     const totalCalls = usageHistory.length;
@@ -351,15 +377,15 @@ export function AISettingsModal({
                 </div>
               )}
 
-              {/* Model Auto-Detection & Picker */}
+              {/* Model Auto-Detection & Smart Fit Advisor */}
               <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-200">
-                      Model Selection
+                      Model Selection & Smart Fit Advisor
                     </h3>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Auto-detect live models from {activeProvider.label} or type any model ID.
+                      Auto-detects live models and ranks them for ReviewForge&apos;s nested JSON + 16-language logic.
                     </p>
                   </div>
                   <button
@@ -377,14 +403,111 @@ export function AISettingsModal({
                   </button>
                 </div>
 
+                {/* Smart Recommendation Banner */}
+                {bestDetectedModel ? (
+                  <div className="p-3 rounded-xl bg-gradient-to-r from-sky-50 via-indigo-50/70 to-white dark:from-sky-500/15 dark:via-indigo-500/10 dark:to-slate-900/60 border border-sky-200 dark:border-sky-500/30 space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-sky-600 text-white">
+                            <Award className="w-3 h-3" />
+                            Best Fit · {bestDetectedModel.fit.score}/100
+                          </span>
+                          <span className="text-xs font-bold font-mono text-slate-900 dark:text-white truncate">
+                            {bestDetectedModel.id}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
+                          {bestDetectedModel.fit.reason}
+                        </p>
+                      </div>
+                      {settings.model !== bestDetectedModel.id && (
+                        <button
+                          type="button"
+                          onClick={() => onUpdateSettings({ model: bestDetectedModel.id })}
+                          className="shrink-0 px-2.5 py-1.5 text-[11px] font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-lg transition-colors cursor-pointer"
+                        >
+                          Use Best Fit
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 pt-1">
+                      {[
+                        { label: 'JSON Schema', val: bestDetectedModel.fit.metrics.jsonReliability },
+                        { label: 'Multilingual', val: bestDetectedModel.fit.metrics.multilingual },
+                        { label: 'Speed / Value', val: bestDetectedModel.fit.metrics.speedValue },
+                      ].map((bar) => (
+                        <div key={bar.label} className="space-y-1">
+                          <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+                            <span>{bar.label}</span>
+                            <span className="font-mono font-semibold text-slate-700 dark:text-slate-200">
+                              {bar.val}%
+                            </span>
+                          </div>
+                          <div className="h-1.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-sky-500 to-indigo-500"
+                              style={{ width: `${bar.val}%` }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-sky-50/70 dark:bg-sky-500/10 border border-sky-200/80 dark:border-sky-500/25 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-sky-800 dark:text-sky-300">
+                        <Award className="w-3.5 h-3.5" />
+                        Recommended for {activeProvider.shortLabel}:{' '}
+                        <code className="font-mono font-bold">{providerGuide.topPick}</code>
+                      </span>
+                      {providerGuide.topPick !== 'Server Default' && settings.model !== providerGuide.topPick && (
+                        <button
+                          type="button"
+                          onClick={() => onUpdateSettings({ model: providerGuide.topPick })}
+                          className="text-[11px] font-semibold text-sky-700 dark:text-sky-300 hover:underline cursor-pointer"
+                        >
+                          Apply recommended
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                      <strong>Why:</strong> {providerGuide.whyItFits}
+                    </p>
+                  </div>
+                )}
+
                 {/* Active Model Input */}
-                <input
-                  type="text"
-                  value={settings.model}
-                  onChange={(e) => onUpdateSettings({ model: e.target.value })}
-                  placeholder={activeProvider.defaultModel || 'Enter or select a model ID'}
-                  className="w-full h-9 px-3 text-sm font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
-                />
+                <div className="space-y-1.5">
+                  <input
+                    type="text"
+                    value={settings.model}
+                    onChange={(e) => onUpdateSettings({ model: e.target.value })}
+                    placeholder={activeProvider.defaultModel || 'Enter or select a model ID'}
+                    className="w-full h-9 px-3 text-sm font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+                  {selectedModelFit && (
+                    <div className="flex items-center justify-between gap-2 text-[11px] px-1">
+                      <span className="text-slate-500 dark:text-slate-400 truncate">
+                        {selectedModelFit.reason}
+                      </span>
+                      <span
+                        className={`shrink-0 px-1.5 py-0.5 rounded font-semibold ${
+                          selectedModelFit.tier === 'best'
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300'
+                            : selectedModelFit.tier === 'great'
+                            ? 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300'
+                            : selectedModelFit.tier === 'caution'
+                            ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300'
+                            : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                        }`}
+                      >
+                        {selectedModelFit.tierLabel} ({selectedModelFit.score})
+                      </span>
+                    </div>
+                  )}
+                </div>
 
                 {modelsError && (
                   <p className="text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 rounded-lg px-3 py-2">
@@ -392,7 +515,7 @@ export function AISettingsModal({
                   </p>
                 )}
 
-                {detectedModels.length > 0 && (
+                {rankedModels.length > 0 && (
                   <div className="space-y-2">
                     <div className="relative">
                       <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -400,11 +523,11 @@ export function AISettingsModal({
                         type="text"
                         value={modelSearch}
                         onChange={(e) => setModelSearch(e.target.value)}
-                        placeholder={`Filter ${detectedModels.length} detected models...`}
+                        placeholder={`Filter ${rankedModels.length} detected models (ranked by best fit)...`}
                         className="w-full h-8 pl-8 pr-3 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500"
                       />
                     </div>
-                    <div className="max-h-44 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950">
+                    <div className="max-h-48 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950">
                       {filteredModels.slice(0, 80).map((m) => {
                         const isSelected = settings.model === m.id;
                         return (
@@ -418,16 +541,29 @@ export function AISettingsModal({
                                 : 'hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-300'
                             }`}
                           >
-                            <span className="truncate font-mono">{m.id}</span>
+                            <div className="min-w-0">
+                              <div className="truncate font-mono">{m.id}</div>
+                              <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                                {m.fit.reason}
+                              </div>
+                            </div>
                             <span className="flex items-center gap-1.5 shrink-0">
+                              <span
+                                className={`px-1.5 py-0.5 text-[10px] font-semibold rounded ${
+                                  m.fit.tier === 'best'
+                                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300'
+                                    : m.fit.tier === 'great'
+                                    ? 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300'
+                                    : m.fit.tier === 'caution'
+                                    ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300'
+                                    : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                                }`}
+                              >
+                                {m.fit.tierLabel} · {m.fit.score}
+                              </span>
                               {m.isFree && (
-                                <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">
+                                <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300">
                                   FREE
-                                </span>
-                              )}
-                              {m.contextLength && (
-                                <span className="text-[10px] text-slate-400">
-                                  {Math.round(m.contextLength / 1000)}k
                                 </span>
                               )}
                               {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-sky-500" />}
