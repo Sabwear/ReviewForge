@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { ConfigSidebar } from './components/ConfigSidebar';
+import { DashboardView } from './components/DashboardView';
 import { DatasetTableView } from './components/DatasetTableView';
 import { TemplateLibraryView } from './components/TemplateLibraryView';
 import { TopBar } from './components/TopBar';
@@ -540,7 +541,7 @@ export default function App() {
         onExportCSV={handleExportCSV}
       />
 
-      <div className="flex-1 w-full max-w-[1440px] mx-auto flex flex-col lg:flex-row">
+      <div className="flex-1 w-full max-w-[1680px] mx-auto flex flex-col lg:flex-row">
         <ConfigSidebar
           products={products}
           sourceLabel={sourceLabel}
@@ -577,6 +578,7 @@ export default function App() {
               excludedCount={excluded.length}
               reviews={reviews}
               exportFormat={config.exportFormat}
+              storeBaseUrl={config.storeBaseUrl}
               volumePreset={config.volumePreset}
               minReviewsPerItem={config.minReviewsPerItem}
               maxReviewsPerItem={config.maxReviewsPerItem}
@@ -593,11 +595,26 @@ export default function App() {
               onScanWebsite={handleScanWebsite}
               onUploadFile={handleUploadFile}
               onLoadSampleBusiness={handleLoadSampleBusiness}
+              onSelectExportFormat={(exportFormat) =>
+                setConfig((prev) => ({ ...prev, exportFormat }))
+              }
               onRegenerateReview={handleRegenerateReview}
               onDeleteReview={handleDeleteReview}
               onExportCSV={handleExportCSV}
               onCopyCSV={handleCopyCSV}
               onOpenDatasetTab={() => setActiveTab('dataset')}
+            />
+          )}
+
+          {activeTab === 'dashboard' && (
+            <DashboardView
+              reviews={reviews}
+              eligibleProducts={eligible}
+              exportFormat={config.exportFormat}
+              activeBusinessLabel={activeBusinessLabel}
+              onExportCSV={handleExportCSV}
+              onOpenWorkbench={() => setActiveTab('workbench')}
+              onLoadSampleBusiness={handleLoadSampleBusiness}
             />
           )}
 

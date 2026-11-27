@@ -7,6 +7,7 @@ import {
   Download,
   Search,
   Star,
+  WrapText,
 } from 'lucide-react';
 import {
   EXPORT_FORMAT_OPTIONS,
@@ -16,6 +17,7 @@ import {
   ReviewLanguage,
 } from '../types/reviews';
 import { resolveProductUrl, serializeReviewsByFormat } from '../utils/csv';
+import { SyntaxHighlightedCode } from '../utils/syntaxHighlight';
 
 interface DatasetTableViewProps {
   reviews: GeneratedReview[];
@@ -42,6 +44,7 @@ export function DatasetTableView({
   const [starFilter, setStarFilter] = useState<number | 'all'>('all');
   const [page, setPage] = useState(1);
   const [copied, setCopied] = useState(false);
+  const [wrapLines, setWrapLines] = useState(false);
   const [previewMode, setPreviewMode] = useState<'table' | 'raw'>(
     exportFormat === 'markdown' ||
       exportFormat === 'json' ||
@@ -182,22 +185,41 @@ export function DatasetTableView({
       {/* Raw File Preview Panel (when Raw tab selected) */}
       {previewMode === 'raw' ? (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          <div className="px-5 py-3 border-b border-slate-200 flex items-center justify-between text-xs text-slate-500">
+          <div className="px-5 py-3 border-b border-slate-200 flex items-center justify-between gap-3 text-xs text-slate-500">
             <span className="font-medium text-slate-700">
               Live {activeFormat.label} Output Preview
             </span>
-            <span className="font-mono tabular-nums">
-              Showing {Math.min(filtered.length, 60)} of {filtered.length} rows
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="font-mono tabular-nums">
+                Showing {Math.min(filtered.length, 60)} of {filtered.length} rows
+              </span>
+              <button
+                type="button"
+                onClick={() => setWrapLines((w) => !w)}
+                aria-pressed={wrapLines}
+                className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md border transition-colors cursor-pointer ${
+                  wrapLines
+                    ? 'bg-sky-50 border-sky-300 text-sky-800'
+                    : 'bg-white border-slate-300 text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <WrapText className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Wrap</span>
+              </button>
+            </div>
           </div>
           {filtered.length === 0 ? (
             <p className="p-8 text-center text-sm text-slate-500">
               No reviews generated yet. Scan a website or upload a CSV to preview output.
             </p>
           ) : (
-            <pre className="p-5 text-xs font-mono text-slate-800 bg-slate-50/60 overflow-x-auto max-h-[620px] leading-relaxed whitespace-pre-wrap">
-              {rawPreviewText}
-            </pre>
+            <div className="bg-[#0F172A] overflow-auto max-h-[640px] py-3">
+              <SyntaxHighlightedCode
+                code={rawPreviewText}
+                format={exportFormat}
+                wrapLines={wrapLines}
+              />
+            </div>
           )}
         </div>
       ) : (

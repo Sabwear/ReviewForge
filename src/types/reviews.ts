@@ -238,4 +238,4 @@ export interface GeneratorConfig {
   dateEnd: string;
 }
 
-export type ActiveTab = 'workbench' | 'dataset' | 'library';
+export type ActiveTab = 'workbench' | 'dashboard' | 'dataset' | 'library';

@@ -18,6 +18,7 @@ export function TopBar({
 }: TopBarProps) {
   const navItems: { id: ActiveTab; label: string }[] = [
     { id: 'workbench', label: 'Workbench' },
+    { id: 'dashboard', label: 'Dashboard' },
     { id: 'dataset', label: 'Export Preview' },
     { id: 'library', label: 'Review Library' },
   ];
@@ -27,7 +28,7 @@ export function TopBar({
 
   return (
     <header className="sticky top-0 z-30 bg-white border-b border-slate-200">
-      <div className="max-w-[1440px] mx-auto px-6 h-16 flex items-center justify-between gap-8">
+      <div className="max-w-[1680px] mx-auto px-6 h-16 flex items-center justify-between gap-8">
         {/* Zone 1: Single wordmark */}
         <a
           href="#top"

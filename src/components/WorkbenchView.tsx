@@ -1,11 +1,15 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   Check,
   Copy,
   Download,
   Globe,
   Loader2,
+  PanelRightClose,
+  PanelRightOpen,
   RefreshCw,
+  RotateCcw,
   Search,
   Sparkles,
   Star,
@@ -25,6 +29,7 @@ import {
 } from '../types/reviews';
 import { normalizeReviewBody } from '../utils/generator';
 import { AnalyticsGraphs, PresetCurvePreviewGraph } from './AnalyticsGraphs';
+import { ExportPreviewSidePanel } from './ExportPreviewSidePanel';
 import {
   EndlessReviewBanner,
   LiveReviewSpotlightCarousel,
@@ -37,6 +42,7 @@ interface WorkbenchViewProps {
   excludedCount: number;
   reviews: GeneratedReview[];
   exportFormat: ExportFormat;
+  storeBaseUrl: string;
   volumePreset: StoreVolumePreset;
   minReviewsPerItem: number;
   maxReviewsPerItem: number;
@@ -53,6 +59,7 @@ interface WorkbenchViewProps {
   onScanWebsite: (url: string) => void;
   onUploadFile: (file: File) => void;
   onLoadSampleBusiness: (id: SampleBusinessId) => void;
+  onSelectExportFormat: (format: ExportFormat) => void;
   onRegenerateReview: (reviewId: string) => void;
   onDeleteReview: (reviewId: string) => void;
   onExportCSV: () => void;
@@ -68,12 +75,39 @@ const VOICE_LABELS: Record<string, string> = {
   technical: 'Detail-focused',
 };
 
+type SentimentFilter =
+  | 'all'
+  | 'positive'
+  | 'five_star'
+  | 'mixed'
+  | 'negative'
+  | 'one_star';
+
+function matchesSentiment(stars: number, sentiment: SentimentFilter): boolean {
+  switch (sentiment) {
+    case 'positive':
+      return stars >= 4;
+    case 'five_star':
+      return stars === 5;
+    case 'mixed':
+      return stars === 3;
+    case 'negative':
+      return stars <= 2;
+    case 'one_star':
+      return stars === 1;
+    case 'all':
+    default:
+      return true;
+  }
+}
+
 export function WorkbenchView({
   totalProductsCount,
   eligibleProducts,
   excludedCount,
   reviews,
   exportFormat,
+  storeBaseUrl,
   volumePreset,
   minReviewsPerItem,
   maxReviewsPerItem,
@@ -90,6 +124,7 @@ export function WorkbenchView({
   onScanWebsite,
   onUploadFile,
   onLoadSampleBusiness,
+  onSelectExportFormat,
   onRegenerateReview,
   onDeleteReview,
   onExportCSV,
@@ -101,8 +136,30 @@ export function WorkbenchView({
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [languageFilter, setLanguageFilter] = useState<ReviewLanguage | 'all'>('all');
   const [starFilter, setStarFilter] = useState<number | 'all'>('all');
+  const [sentimentFilter, setSentimentFilter] = useState<SentimentFilter>('all');
   const [buyerFilter, setBuyerFilter] = useState<'all' | 'returning' | 'first'>('all');
   const [copied, setCopied] = useState(false);
+  const [showCodePanel, setShowCodePanel] = useState(true);
+
+  const handleSelectSentiment = (next: SentimentFilter) => {
+    setSentimentFilter((prev) => (prev === next && next !== 'all' ? 'all' : next));
+    setStarFilter('all');
+  };
+
+  const handleSelectStarFilter = (next: number | 'all') => {
+    setStarFilter(next);
+    if (next === 'all') {
+      setSentimentFilter('all');
+    } else if (next === 5) {
+      setSentimentFilter('five_star');
+    } else if (next === 3) {
+      setSentimentFilter('mixed');
+    } else if (next === 1) {
+      setSentimentFilter('one_star');
+    } else {
+      setSentimentFilter('all');
+    }
+  };
 
   const activeFormat =
     EXPORT_FORMAT_OPTIONS.find((f) => f.id === exportFormat) ?? EXPORT_FORMAT_OPTIONS[0];
@@ -196,12 +253,32 @@ export function WorkbenchView({
     };
   }, [eligibleProducts, reviews]);
 
+  const sentimentCounts = useMemo(() => {
+    const counts = {
+      all: reviews.length,
+      positive: 0,
+      five_star: 0,
+      mixed: 0,
+      negative: 0,
+      one_star: 0,
+    };
+    for (const r of reviews) {
+      if (r.stars >= 4) counts.positive += 1;
+      if (r.stars === 5) counts.five_star += 1;
+      if (r.stars === 3) counts.mixed += 1;
+      if (r.stars <= 2) counts.negative += 1;
+      if (r.stars === 1) counts.one_star += 1;
+    }
+    return counts;
+  }, [reviews]);
+
   const filteredReviews = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return reviews.filter((r) => {
       if (categoryFilter !== 'all' && r.category !== categoryFilter) return false;
       if (languageFilter !== 'all' && r.language !== languageFilter) return false;
       if (starFilter !== 'all' && r.stars !== starFilter) return false;
+      if (!matchesSentiment(r.stars, sentimentFilter)) return false;
       if (buyerFilter === 'returning' && !r.isReturningCustomer) return false;
       if (buyerFilter === 'first' && r.isReturningCustomer) return false;
       if (q) {
@@ -210,7 +287,43 @@ export function WorkbenchView({
       }
       return true;
     });
-  }, [reviews, searchQuery, categoryFilter, languageFilter, starFilter, buyerFilter]);
+  }, [reviews, searchQuery, categoryFilter, languageFilter, starFilter, sentimentFilter, buyerFilter]);
+
+  const isInspectingCriticalFeedback =
+    sentimentFilter === 'negative' ||
+    sentimentFilter === 'one_star' ||
+    sentimentFilter === 'mixed' ||
+    starFilter === 1 ||
+    starFilter === 2 ||
+    starFilter === 3;
+
+  const criticalPatternOfferings = useMemo(() => {
+    if (!isInspectingCriticalFeedback || filteredReviews.length === 0) return [];
+    const counts = new Map<string, number>();
+    for (const r of filteredReviews) {
+      counts.set(r.item_name, (counts.get(r.item_name) || 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4);
+  }, [isInspectingCriticalFeedback, filteredReviews]);
+
+  const hasActiveFilters =
+    searchQuery.trim() !== '' ||
+    categoryFilter !== 'all' ||
+    languageFilter !== 'all' ||
+    starFilter !== 'all' ||
+    sentimentFilter !== 'all' ||
+    buyerFilter !== 'all';
+
+  const resetAllFilters = () => {
+    setSearchQuery('');
+    setCategoryFilter('all');
+    setLanguageFilter('all');
+    setStarFilter('all');
+    setSentimentFilter('all');
+    setBuyerFilter('all');
+  };
 
   const previewLimit = 24;
   const visibleReviews = filteredReviews.slice(0, previewLimit);
@@ -231,15 +344,41 @@ export function WorkbenchView({
 
   if (totalProductsCount === 0) {
     return (
-      <div className="flex-1 min-w-0 p-6 lg:p-8 space-y-8">
-        <div className="space-y-2">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 text-balance">
-            Generate Organic Reviews for Any Business
-          </h1>
-          <p className="text-sm sm:text-base text-slate-600 max-w-3xl leading-relaxed">
-            Paste any website URL to automatically scan its services or store catalog, or upload a Shopify, Judge.me, or standard CSV. Nothing is preloaded—every run adapts fresh across 16 global languages.
-          </p>
-        </div>
+      <div className="flex-1 min-w-0 flex flex-col xl:flex-row">
+        <div className="flex-1 min-w-0 p-6 lg:p-8 space-y-8">
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+            <div className="space-y-2">
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 text-balance">
+                Generate Organic Reviews for Any Business
+              </h1>
+              <p className="text-sm sm:text-base text-slate-600 max-w-3xl leading-relaxed">
+                Paste any website URL to automatically scan its services or store catalog, or upload a Shopify, Judge.me, or standard CSV. Nothing is preloaded—every run adapts fresh across 16 global languages.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowCodePanel((prev) => !prev)}
+              aria-pressed={showCodePanel}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 text-xs font-medium rounded-lg border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                showCodePanel
+                  ? 'bg-slate-900 text-white border-slate-900 hover:bg-slate-800'
+                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+              }`}
+            >
+              {showCodePanel ? (
+                <>
+                  <PanelRightClose className="w-4 h-4" aria-hidden="true" />
+                  <span>Hide Code</span>
+                </>
+              ) : (
+                <>
+                  <PanelRightOpen className="w-4 h-4" aria-hidden="true" />
+                  <span>Live Export</span>
+                </>
+              )}
+            </button>
+          </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Option A: Scan any website */}
@@ -359,76 +498,120 @@ export function WorkbenchView({
             ))}
           </div>
         </div>
+        </div>
+
+        {showCodePanel && (
+          <ExportPreviewSidePanel
+            reviews={reviews}
+            filteredReviews={filteredReviews}
+            exportFormat={exportFormat}
+            storeBaseUrl={storeBaseUrl}
+            activeBusinessLabel={activeBusinessLabel}
+            onSelectExportFormat={onSelectExportFormat}
+            onExportDownload={onExportCSV}
+            onCopyExport={onCopyCSV}
+            onOpenDatasetTab={onOpenDatasetTab}
+            onLoadSampleBusiness={onLoadSampleBusiness}
+            onClose={() => setShowCodePanel(false)}
+          />
+        )}
       </div>
     );
   }
 
   return (
-    <div className="flex-1 min-w-0 p-6 lg:p-8 space-y-8">
-      {/* Page Title & Actions */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 text-balance">
-            Organic Review Workbench
-          </h1>
-          <p className="text-sm text-slate-600 mt-1">
-            Active voice:{' '}
-            <span className="font-semibold text-slate-800">{activeBusinessLabel}</span>
-            {' · '}
-            <span className="font-mono text-xs text-slate-600">
-              {activeFormat.label}
-            </span>
-            {isAdapting ? (
-              <span className="text-sky-700"> · Auto-scanning products & tailoring copy...</span>
-            ) : isAdapted ? (
-              <span className="text-emerald-700"> · Scanned & adapted</span>
-            ) : (
-              <span className="text-slate-500"> · Category-aware ready</span>
-            )}
-            {excludedCount > 0 && (
-              <span className="text-slate-500 font-mono tabular-nums">
-                {' '}· {excludedCount} excluded
+    <div className="flex-1 min-w-0 flex flex-col xl:flex-row">
+      <div className="flex-1 min-w-0 p-6 lg:p-8 space-y-8">
+        {/* Page Title & Actions */}
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 text-balance">
+              Organic Review Workbench
+            </h1>
+            <p className="text-sm text-slate-600 mt-1">
+              Active voice:{' '}
+              <span className="font-semibold text-slate-800">{activeBusinessLabel}</span>
+              {' · '}
+              <span className="font-mono text-xs text-slate-600">
+                {activeFormat.label}
               </span>
-            )}
-          </p>
+              {isAdapting ? (
+                <span className="text-sky-700"> · Auto-scanning products & tailoring copy...</span>
+              ) : isAdapted ? (
+                <span className="text-emerald-700"> · Scanned & adapted</span>
+              ) : (
+                <span className="text-slate-500"> · Category-aware ready</span>
+              )}
+              {excludedCount > 0 && (
+                <span className="text-slate-500 font-mono tabular-nums">
+                  {' '}· {excludedCount} excluded
+                </span>
+              )}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowCodePanel((prev) => !prev)}
+              aria-pressed={showCodePanel}
+              className={`inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border transition-colors cursor-pointer whitespace-nowrap ${
+                showCodePanel
+                  ? 'bg-slate-900 text-white border-slate-900 hover:bg-slate-800'
+                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+              }`}
+            >
+              {showCodePanel ? (
+                <>
+                  <PanelRightClose className="w-4 h-4" aria-hidden="true" />
+                  <span>Hide Code</span>
+                </>
+              ) : (
+                <>
+                  <PanelRightOpen className="w-4 h-4" aria-hidden="true" />
+                  <span>Live Export</span>
+                </>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={handleCopy}
+              disabled={reviews.length === 0}
+              className="inline-flex items-center gap-2 px-3.5 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-50 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+            >
+              {copied ? (
+                <>
+                  <Check className="w-4 h-4 text-emerald-600" aria-hidden="true" />
+                  <span>Copied {activeFormat.shortLabel}</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4 text-slate-500" aria-hidden="true" />
+                  <span>Copy {activeFormat.shortLabel}</span>
+                </>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={onExportCSV}
+              disabled={reviews.length === 0}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-sky-700 hover:bg-sky-800 disabled:bg-slate-200 disabled:text-slate-500 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <Download className="w-4 h-4" aria-hidden="true" />
+              <span>Download {activeFormat.label}</span>
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2.5 shrink-0">
-          <button
-            type="button"
-            onClick={handleCopy}
-            disabled={reviews.length === 0}
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-50 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
-          >
-            {copied ? (
-              <>
-                <Check className="w-4 h-4 text-emerald-600" aria-hidden="true" />
-                <span>Copied {activeFormat.shortLabel}</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-4 h-4 text-slate-500" aria-hidden="true" />
-                <span>Copy {activeFormat.shortLabel}</span>
-              </>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={onExportCSV}
-            disabled={reviews.length === 0}
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-sky-700 hover:bg-sky-800 disabled:bg-slate-200 disabled:text-slate-500 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
-          >
-            <Download className="w-4 h-4" aria-hidden="true" />
-            <span>Download {activeFormat.label}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Flat Summary Metrics Strip */}
-      <section
-        aria-label="Dataset summary"
-        className="bg-white border border-slate-200 rounded-xl grid grid-cols-2 xl:grid-cols-4 divide-y xl:divide-y-0 xl:divide-x divide-slate-200"
-      >
+        {/* Flat Summary Metrics Strip */}
+        <section
+          aria-label="Dataset summary"
+          className={`bg-white border border-slate-200 rounded-xl grid grid-cols-2 divide-y divide-slate-200 ${
+            showCodePanel
+              ? '2xl:grid-cols-4 2xl:divide-y-0 2xl:divide-x'
+              : 'xl:grid-cols-4 xl:divide-y-0 xl:divide-x'
+          }`}
+        >
         <div className="p-5">
           <div className="text-xs font-medium text-slate-500">Generated Reviews</div>
           <div className="mt-1.5 flex items-baseline gap-2">
@@ -492,7 +675,7 @@ export function WorkbenchView({
           buckets={analytics.buckets}
           starFilter={starFilter}
           languageFilter={languageFilter}
-          onSelectStarFilter={setStarFilter}
+          onSelectStarFilter={handleSelectStarFilter}
           onSelectLanguageFilter={setLanguageFilter}
         />
       )}
@@ -507,94 +690,260 @@ export function WorkbenchView({
 
       {/* Live Preview Feed */}
       <section aria-label="Generated review preview" className="bg-white border border-slate-200 rounded-xl">
-        <div className="p-5 border-b border-slate-200 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold text-slate-900">
-              Live Review Preview
-            </h2>
-            <span className="text-xs text-slate-400" aria-hidden="true">
-              ·
-            </span>
-            <span className="text-xs font-mono tabular-nums text-slate-500">
-              Showing {visibleReviews.length} of {filteredReviews.length.toLocaleString()}
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2.5">
-            <div className="relative flex-1 sm:flex-initial">
-              <Search
-                className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-                aria-hidden="true"
-              />
-              <input
-                type="search"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search product, email, text..."
-                className="w-full sm:w-52 h-9 pl-9 pr-3 text-xs rounded-lg border border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/20"
-              />
+        <div className="p-5 border-b border-slate-200 space-y-4">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-slate-900">
+                Live Review Preview
+              </h2>
+              <span className="text-xs text-slate-400" aria-hidden="true">
+                ·
+              </span>
+              <span className="text-xs font-mono tabular-nums text-slate-500">
+                Showing {visibleReviews.length} of {filteredReviews.length.toLocaleString()}
+              </span>
+              {hasActiveFilters && (
+                <>
+                  <span className="text-xs text-slate-400" aria-hidden="true">
+                    ·
+                  </span>
+                  <button
+                    type="button"
+                    onClick={resetAllFilters}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-sky-700 hover:text-sky-900 cursor-pointer whitespace-nowrap"
+                  >
+                    <RotateCcw className="w-3 h-3" aria-hidden="true" />
+                    <span>Reset filters</span>
+                  </button>
+                </>
+              )}
             </div>
 
-            <select
-              aria-label="Filter by language"
-              value={languageFilter}
-              onChange={(e) =>
-                setLanguageFilter(e.target.value as ReviewLanguage | 'all')
-              }
-              className="h-9 px-3 text-xs font-medium rounded-lg border border-slate-300 bg-white text-slate-700 focus:border-sky-600 focus:outline-none cursor-pointer"
-            >
-              <option value="all">All Languages</option>
-              {LANGUAGE_OPTIONS.map((lang) => (
-                <option key={lang.code} value={lang.code}>
-                  {lang.flag} {lang.label}
-                </option>
-              ))}
-            </select>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="relative flex-1 sm:flex-initial">
+                <Search
+                  className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                  aria-hidden="true"
+                />
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search product, email, text..."
+                  className="w-full sm:w-52 h-9 pl-9 pr-3 text-xs rounded-lg border border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 focus:border-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-600/20"
+                />
+              </div>
 
-            <select
-              aria-label="Filter by buyer type"
-              value={buyerFilter}
-              onChange={(e) =>
-                setBuyerFilter(e.target.value as 'all' | 'returning' | 'first')
-              }
-              className="h-9 px-3 text-xs font-medium rounded-lg border border-slate-300 bg-white text-slate-700 focus:border-sky-600 focus:outline-none cursor-pointer"
-            >
-              <option value="all">All Buyers</option>
-              <option value="returning">Returning Customers</option>
-              <option value="first">One-Time Buyers</option>
-            </select>
+              <select
+                aria-label="Filter by language"
+                value={languageFilter}
+                onChange={(e) =>
+                  setLanguageFilter(e.target.value as ReviewLanguage | 'all')
+                }
+                className="h-9 px-3 text-xs font-medium rounded-lg border border-slate-300 bg-white text-slate-700 focus:border-sky-600 focus:outline-none cursor-pointer"
+              >
+                <option value="all">All Languages</option>
+                {LANGUAGE_OPTIONS.map((lang) => (
+                  <option key={lang.code} value={lang.code}>
+                    {lang.flag} {lang.label}
+                  </option>
+                ))}
+              </select>
 
-            <select
-              aria-label="Filter by category"
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              className="h-9 px-3 text-xs font-medium rounded-lg border border-slate-300 bg-white text-slate-700 focus:border-sky-600 focus:outline-none cursor-pointer"
-            >
-              <option value="all">All Categories</option>
-              {analytics.categories.map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat}
-                </option>
-              ))}
-            </select>
+              <select
+                aria-label="Filter by buyer type"
+                value={buyerFilter}
+                onChange={(e) =>
+                  setBuyerFilter(e.target.value as 'all' | 'returning' | 'first')
+                }
+                className="h-9 px-3 text-xs font-medium rounded-lg border border-slate-300 bg-white text-slate-700 focus:border-sky-600 focus:outline-none cursor-pointer"
+              >
+                <option value="all">All Buyers</option>
+                <option value="returning">Returning Customers</option>
+                <option value="first">One-Time Buyers</option>
+              </select>
 
-            <select
-              aria-label="Filter by star rating"
-              value={starFilter}
-              onChange={(e) =>
-                setStarFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))
-              }
-              className="h-9 px-3 text-xs font-medium rounded-lg border border-slate-300 bg-white text-slate-700 focus:border-sky-600 focus:outline-none cursor-pointer"
-            >
-              <option value="all">All Stars</option>
-              {[5, 4, 3, 2, 1].map((s) => (
-                <option key={s} value={s}>
-                  {s} Stars
-                </option>
-              ))}
-            </select>
+              <select
+                aria-label="Filter by category"
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="h-9 px-3 text-xs font-medium rounded-lg border border-slate-300 bg-white text-slate-700 focus:border-sky-600 focus:outline-none cursor-pointer"
+              >
+                <option value="all">All Categories</option>
+                {analytics.categories.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                aria-label="Filter by star rating"
+                value={starFilter}
+                onChange={(e) =>
+                  handleSelectStarFilter(
+                    e.target.value === 'all' ? 'all' : Number(e.target.value)
+                  )
+                }
+                className="h-9 px-3 text-xs font-medium rounded-lg border border-slate-300 bg-white text-slate-700 focus:border-sky-600 focus:outline-none cursor-pointer"
+              >
+                <option value="all">All Stars</option>
+                {[5, 4, 3, 2, 1].map((s) => (
+                  <option key={s} value={s}>
+                    {s} Stars
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Sentiment Visibility Filter Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-medium text-slate-500">Sentiment</span>
+              <div
+                role="tablist"
+                aria-label="Filter reviews by sentiment"
+                className="inline-flex flex-wrap items-center gap-1 p-1 bg-slate-100 rounded-lg"
+              >
+                {(
+                  [
+                    {
+                      id: 'all',
+                      label: 'All',
+                      count: sentimentCounts.all,
+                      activeText: 'text-slate-900',
+                    },
+                    {
+                      id: 'positive',
+                      label: 'Positive (4–5★)',
+                      count: sentimentCounts.positive,
+                      activeText: 'text-emerald-700',
+                    },
+                    {
+                      id: 'five_star',
+                      label: '5-Star Only',
+                      count: sentimentCounts.five_star,
+                      activeText: 'text-emerald-700',
+                    },
+                    {
+                      id: 'mixed',
+                      label: 'Mixed (3★)',
+                      count: sentimentCounts.mixed,
+                      activeText: 'text-amber-700',
+                    },
+                    {
+                      id: 'negative',
+                      label: 'Negative (1–2★)',
+                      count: sentimentCounts.negative,
+                      activeText: 'text-rose-700',
+                    },
+                    {
+                      id: 'one_star',
+                      label: '1-Star Only',
+                      count: sentimentCounts.one_star,
+                      activeText: 'text-rose-700',
+                    },
+                  ] as const
+                ).map((opt) => {
+                  const isActive = sentimentFilter === opt.id && starFilter === 'all';
+                  const isExactMatch =
+                    isActive ||
+                    (opt.id === 'five_star' && starFilter === 5) ||
+                    (opt.id === 'mixed' && starFilter === 3) ||
+                    (opt.id === 'one_star' && starFilter === 1);
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={isExactMatch}
+                      onClick={() => handleSelectSentiment(opt.id)}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600 ${
+                        isExactMatch
+                          ? `bg-white shadow-xs ${opt.activeText}`
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <span>{opt.label}</span>
+                      <span
+                        className={`font-mono tabular-nums text-[11px] ${
+                          isExactMatch ? 'opacity-80' : 'text-slate-400'
+                        }`}
+                      >
+                        {opt.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
+
+        {/* Negative / Mixed Feedback Pattern Strip */}
+        {isInspectingCriticalFeedback && filteredReviews.length > 0 && (
+          <div
+            className={`px-5 py-3 border-b flex flex-wrap items-center justify-between gap-3 text-xs ${
+              sentimentFilter === 'mixed' || starFilter === 3
+                ? 'bg-amber-50/70 border-amber-200/80 text-amber-950'
+                : 'bg-rose-50/70 border-rose-200/80 text-rose-950'
+            }`}
+          >
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <AlertTriangle
+                className={`w-3.5 h-3.5 shrink-0 ${
+                  sentimentFilter === 'mixed' || starFilter === 3
+                    ? 'text-amber-600'
+                    : 'text-rose-600'
+                }`}
+                aria-hidden="true"
+              />
+              <span className="font-semibold">
+                {sentimentFilter === 'mixed' || starFilter === 3
+                  ? 'Mixed feedback pattern'
+                  : 'Negative feedback pattern'}
+              </span>
+              <span aria-hidden="true" className="opacity-40">
+                ·
+              </span>
+              <span className="font-mono tabular-nums">
+                {filteredReviews.length} review{filteredReviews.length === 1 ? '' : 's'}
+                {reviews.length > 0
+                  ? ` (${((filteredReviews.length / reviews.length) * 100).toFixed(1)}% of dataset)`
+                  : ''}
+              </span>
+              {criticalPatternOfferings.length > 0 && (
+                <>
+                  <span aria-hidden="true" className="opacity-40">
+                    ·
+                  </span>
+                  <span>Most affected:</span>
+                  {criticalPatternOfferings.map(([name, count], idx) => (
+                    <React.Fragment key={name}>
+                      {idx > 0 && (
+                        <span aria-hidden="true" className="opacity-40">
+                          ,
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery(name)}
+                        className="underline decoration-current/40 hover:decoration-current font-medium cursor-pointer"
+                        title={`Filter to ${name}`}
+                      >
+                        {name} ({count})
+                      </button>
+                    </React.Fragment>
+                  ))}
+                </>
+              )}
+            </div>
+            <span className="text-[11px] opacity-75">
+              Use the regenerate or delete icons on any row to adjust copy
+            </span>
+          </div>
+        )}
 
         {visibleReviews.length === 0 ? (
           <div className="px-6 py-14 text-center">
@@ -651,6 +1000,18 @@ export function WorkbenchView({
                       </span>
                       <span aria-hidden="true">·</span>
                       <span>{VOICE_LABELS[review.voice] || review.voice}</span>
+                      {review.stars <= 2 && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span className="font-medium text-rose-700">Negative</span>
+                        </>
+                      )}
+                      {review.stars === 3 && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span className="font-medium text-amber-700">Mixed</span>
+                        </>
+                      )}
                       {review.isReturningCustomer && (
                         <>
                           <span aria-hidden="true">·</span>
@@ -719,6 +1080,23 @@ export function WorkbenchView({
           </div>
         )}
       </section>
+      </div>
+
+      {showCodePanel && (
+        <ExportPreviewSidePanel
+          reviews={reviews}
+          filteredReviews={filteredReviews}
+          exportFormat={exportFormat}
+          storeBaseUrl={storeBaseUrl}
+          activeBusinessLabel={activeBusinessLabel}
+          onSelectExportFormat={onSelectExportFormat}
+          onExportDownload={onExportCSV}
+          onCopyExport={onCopyCSV}
+          onOpenDatasetTab={onOpenDatasetTab}
+          onLoadSampleBusiness={onLoadSampleBusiness}
+          onClose={() => setShowCodePanel(false)}
+        />
+      )}
     </div>
   );
 }
